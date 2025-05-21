@@ -2,72 +2,22 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import random
 
-def visualizar_packing(placements, container_width, container_height=None):
-    fig, ax = plt.subplots()
-    colors = {}
-
-    used_heights = [pos[1] + rect[1] for rect, pos in placements]
-    max_height = max(used_heights) if used_heights else 0
-    
-    # Dibujar contenedor
-    ax.set_xlim(0, container_width)
-    ax.set_ylim(0, max_height)
-    ax.set_aspect('equal')
-    ax.set_title("Visualización del HR Packing")
-    ax.set_xlabel("Ancho")
-    ax.set_ylabel("Altura")
-
-    # Ejes con números enteros
-    ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
-    ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
-
-    for i, (rect, pos) in enumerate(placements):
-        w, h = rect
-        x, y = pos
-        color = colors.get(rect)
-        if color is None:
-            color = [random.random() for _ in range(3)]
-            colors[rect] = color
-        ax.add_patch(patches.Rectangle((x, y), w, h, linewidth=1, edgecolor='black', facecolor=color, label=f"{rect}"))
-        ax.text(x + w/2, y + h/2, f"{i}", fontsize=8, ha='center', va='center', color='black')
-
-    # Línea roja en la altura del contenedor
-    ax.axhline(y=container_height, color='red', linestyle='--', linewidth=2, label='Altura contenedor')
-
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-
 
 # ----------------------------
-# 1. Datos del problema
-# ----------------------------
-container_width = 160
-container_height = 240  # referencia, no se impone como límite
-
-
-# Leer rectángulos desde el archivo c7p2.txt
-rectangles_c1p1 = []
-with open("c7p2.txt", "r") as f:
-    for line in f:
-        parts = line.strip().split()
-        if len(parts) >= 2:
-            height, width = map(int, parts[:2])
-            rectangles_c1p1.append((width, height))  # (ancho, alto)
-
-# Rotar todos los rectángulos para que sean más anchos que altos
-# rectangles_c1p1 = [(max(w, h), min(w, h)) for (w, h) in rectangles_c1p1]
-
-initial_space = [(0, 0, container_width, 1000)]  # altura infinita simulada
-
-# ----------------------------
-# 2. Funciones del algoritmo HR (simplificado)
+# Funciones del algoritmo HR (simplificado)
 # ----------------------------
 def rect_fits_in_space(rect, space):
     rw, rh = rect
     x, y, w, h = space
-    return rw <= w and rh <= h
+
+    # Prueba sin rotar y rotado
+    # Sin rotar
+    if rw <= w and rh <= h:
+        return True, 0
+    # Rotado
+    if rh <= w and rw <= h:
+        return True, 1
+    return False, -1
 
 def place_rect(space, rect):
     if rect_fits_in_space(rect, space):
@@ -87,10 +37,33 @@ def divide_space(space, rect, pos):
 
     return S1, S2
 
+
+# Dividir el espacio en S3 y S4
+def divide_space_2(space, rect, pos):
+    x, y, w, h = space        # espacio original: (x, y, ancho, alto)
+    rw, rh = rect             # dimensiones del rectángulo insertado
+    rx, ry = pos              # posición donde fue colocado
+
+    # S3: espacio arriba del rectángulo (bounded por altura del S2)
+    S3 = (rx + rw, y, x + w - (rx + rw), h)
+
+    # S4: espacio a la derecha (bounded por altura del S2)
+    S4 = (x, ry + rh, rw, y + h - (ry + rh))
+
+    return S3, S4
+
+
 def recursive_packing(space, spaces, rects, placed):
     while rects:
         for i, rect in enumerate(rects):
-            if rect_fits_in_space(rect, space):
+            # Verificar si el rectángulo cabe en el espacio
+            fits, rotation = rect_fits_in_space(rect, space)
+            if fits:
+                # Rotar el rectángulo si es necesario
+                if rotation == 1:
+                    rect = (rect[1], rect[0])
+        
+
                 ok, pos = place_rect(space, rect)
                 # print(f"[Recursivo] Probando rectángulo {rect} en espacio {space} -> posición {pos}")
                 if ok:
@@ -98,7 +71,7 @@ def recursive_packing(space, spaces, rects, placed):
                     # print(f"[Recursivo] Rectángulo {rect} colocado en {pos}")
 
                     # Dividir en nuevos S3 y S4 desde el subespacio actual
-                    S3, S4 = divide_space(space, rect, pos)
+                    S3, S4 = divide_space_2(space, rect, pos)
                     # print(f"[Recursivo] División: S3={S3}, S4={S4}\n")
 
                     # Eliminar rectángulo usado
@@ -145,7 +118,6 @@ def hr_packing(spaces, rects):
 
                         # Agregar S1 al espacio disponible para seguir iterando
                         spaces.append(S1)
-
                         # Llamar recursivamente a RecursivePacking con S2 (bounded)
                         recursive_packing(S2, spaces, rects1, placed)
 
@@ -159,9 +131,7 @@ def hr_packing(spaces, rects):
 
     return placed
 
-
 # ----------------------------
-
 def ordenar_por_area(rects):
     return sorted(rects, key=lambda r: r[0] * r[1], reverse=True)
 
@@ -172,6 +142,9 @@ def heuristic_recursion(rects, container_width):
     rects = ordenar_por_area(rects)
     best_height = float('inf')
     best_placements = []
+    rect_sequence = []
+
+    
     # print(f"Rectángulos ordenados por área: {rects}")
     # intercambiar pares (i, j) para generar permutaciones locales
     for i in range(len(rects) - 1):
@@ -188,15 +161,47 @@ def heuristic_recursion(rects, container_width):
             altura = max(used_heights) if used_heights else 0
             
             if altura <= best_height:
+                rect_sequence = temp_rects.copy()
                 best_height = altura
                 best_placements = placements
 
-    return best_placements, best_height
+    return best_placements, best_height, rect_sequence
+
 
 # ----------------------------
-# 3. Ejecutar
-# ----------------------------
-placements, altura = heuristic_recursion(rectangles_c1p1, container_width)
+# Funciones de visualización
+def visualizar_packing(placements, container_width, container_height=None):
+    fig, ax = plt.subplots()
+    colors = {}
 
-print(f"Altura final: {altura}")
-visualizar_packing(placements, container_width, container_height)
+    used_heights = [pos[1] + rect[1] for rect, pos in placements]
+    max_height = max(used_heights) if used_heights else 0
+    
+    # Dibujar contenedor
+    ax.set_xlim(0, container_width)
+    ax.set_ylim(0, max_height)
+    ax.set_aspect('equal')
+    ax.set_title("Visualización del HR Packing")
+    ax.set_xlabel("Ancho")
+    ax.set_ylabel("Altura")
+
+    # Ejes con números enteros
+    ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+
+    for i, (rect, pos) in enumerate(placements):
+        w, h = rect
+        x, y = pos
+        color = colors.get(rect)
+        if color is None:
+            color = [random.random() for _ in range(3)]
+            colors[rect] = color
+        ax.add_patch(patches.Rectangle((x, y), w, h, linewidth=1, edgecolor='black', facecolor=color, label=f"{rect}"))
+        ax.text(x + w/2, y + h/2, f"{i}", fontsize=8, ha='center', va='center', color='black')
+
+    # Línea roja en la altura del contenedor
+    ax.axhline(y=container_height, color='red', linestyle='--', linewidth=2, label='Altura contenedor')
+
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
