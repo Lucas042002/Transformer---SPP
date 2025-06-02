@@ -52,6 +52,34 @@ def divide_space_2(space, rect, pos):
 
     return S3, S4
 
+def codificar_estado(spaces, rects, espacio_seleccionado):
+    """
+    Codifica el estado actual como una lista de vectores [h, w, area, a_utilizar, contexto].
+    - spaces: lista de subespacios disponibles [(x, y, w, h), ...]
+    - rects: lista de bloques pendientes [(w, h), ...]
+    - espacio_seleccionado: tupla (x, y, w, h) del espacio seleccionado para colocar un rectángulo.
+    """
+    # Buscar el índice del espacio seleccionado (match exacto)
+    idx_seleccionado = -1
+    for idx, s in enumerate(spaces):
+        if s == espacio_seleccionado:
+            idx_seleccionado = idx
+            break
+    estado = []
+    # Codificar subespacios
+    for idx, (x, y, w, h) in enumerate(spaces):
+        area = w * h
+        a_utilizar = 1 if idx == idx_seleccionado else 0
+        contexto = 1  # Es un subespacio utilizable
+        estado.append([h, w, area, a_utilizar, contexto])
+    # Codificar bloques pendientes
+    for (w, h) in rects:
+        area = w * h
+        a_utilizar = 0
+        contexto = 0  # Es un bloque pendiente, no un subespacio
+        estado.append([h, w, area, a_utilizar, contexto])
+    return estado
+
 
 def recursive_packing(space, spaces, rects, placed):
     while rects:
@@ -68,7 +96,7 @@ def recursive_packing(space, spaces, rects, placed):
                 # print(f"[Recursivo] Probando rectángulo {rect} en espacio {space} -> posición {pos}")
                 if ok:
                     placed.append((rect, pos))
-                    # print(f"[Recursivo] Rectángulo {rect} colocado en {pos}")
+                    print(f"[Recursivo] Rectángulo {rect} colocado en {pos}")
 
                     # Dividir en nuevos S3 y S4 desde el subespacio actual
                     S3, S4 = divide_space_2(space, rect, pos)
@@ -96,6 +124,11 @@ def hr_packing(spaces, rects):
     placed = []
     rects1 = rects.copy()
 
+    temp_spaces = []
+    estados = []  # Lista para almacenar los estados codificados
+    Y_rect = []  # Lista para almacenar los índices de los rectángulos elegidos
+    estados.append(codificar_estado(spaces, rects1, spaces[0]))  # Estado inicial
+
     while rects1:
         placed_flag = False
 
@@ -106,20 +139,24 @@ def hr_packing(spaces, rects):
                     # print(f"Probando rectángulo {rect} en espacio {space} -> posición {pos}")
                     if ok:
                         placed.append((rect, pos))
-                        # print(f"Rectángulo {rect} colocado en {pos}")
+                        print(f"Rectángulo {rect} colocado en {pos}")
 
                         # Dividir el espacio en S1 (encima, unbounded) y S2 (derecha, bounded)
                         S1, S2 = divide_space(space, rect, pos)
+                        temp_spaces.append(S1)
+                        temp_spaces.append(S2)
+                        estados.append(codificar_estado(spaces, rects1, S2))
                         # print(f"Dividiendo espacio {space} en S1={S1} (encima) y S2={S2} (derecha)\n")
 
                         # Eliminar rectángulo insertado y espacio usado
                         rects1.pop(i)
                         spaces.remove(space)
-
+                        
                         # Agregar S1 al espacio disponible para seguir iterando
                         spaces.append(S1)
                         # Llamar recursivamente a RecursivePacking con S2 (bounded)
-                        recursive_packing(S2, spaces, rects1, placed)
+                        temp_spaces.remove(S2)
+                        recursive_packing(S2, spaces, rects1, placed, estados, Y_rect, temp_spaces)
 
                         placed_flag = True
                         break
@@ -144,30 +181,30 @@ def heuristic_recursion(rects, container_width):
     best_placements = []
     rect_sequence = []
 
-    
-    # print(f"Rectángulos ordenados por área: {rects}")
-    # intercambiar pares (i, j) para generar permutaciones locales
+    all_states = []
+    all_Y_rect = []
+
     for i in range(len(rects) - 1):
         for j in range(i + 1, len(rects)):
             temp_rects = rects.copy()
             temp_rects[i], temp_rects[j] = temp_rects[j], temp_rects[i]
-
-            # print(f"Probando permutación: {temp_rects}")    
-            placements = hr_packing(
+            print(f"Probando permutación: {temp_rects}")
+            placements, estados, Y_rect = hr_packing(
                 spaces=[(0, 0, container_width, 1000)],
-                rects=temp_rects
+                rects=temp_rects 
             )
             used_heights = [pos[1] + rect[1] for rect, pos in placements]
             altura = max(used_heights) if used_heights else 0
-            
-            if altura <= best_height:
-                rect_sequence = temp_rects.copy()
-                best_height = altura
-                best_placements = placements
 
-    return best_placements, best_height, rect_sequence
+            # if altura <= best_height:
+                # print(f"Mejor altura encontrada: {altura} con rectángulos {temp_rects}")
+            rect_sequence = temp_rects.copy()
+            best_height = altura
+            best_placements = placements
+            all_states.append(estados)
+            all_Y_rect.append(Y_rect)
 
-
+    return best_placements, best_height, rect_sequence, all_states, all_Y_rect
 # ----------------------------
 # Funciones de visualización
 def visualizar_packing(placements, container_width, container_height=None):
