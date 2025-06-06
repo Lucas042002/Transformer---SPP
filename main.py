@@ -1,4 +1,6 @@
 import hr_algorithm as hr
+import transformer as tr
+from sklearn.model_selection import train_test_split
 
 # ----------------------------
 # Datos del problema
@@ -41,16 +43,27 @@ else:
 
 #print(f"Rectángulos: {rect_sequence}")
 print(f"Altura final: {altura}")
+# Visualizar el packing
+# hr.visualizar_packing(placements, container_width, container_height)
 
 # Mostrar estados y los índices de los rectángulos elegidos si están disponibles
 if all_states is not None:
     print(f"\nCantidad de secuencias de estados generadas: {len(all_states)}")
-    idx = len(all_states) - 1
-    print(f"\nSecuencia de estados para la última permutación ({idx+1}):")
-    for paso, estado in enumerate(all_states[idx]):
-        print(f"  Paso {paso+1}: {estado}")
-    if all_Y_rect is not None:
-        print(f"  Índices de rectángulos elegidos (Y_rect): {all_Y_rect[idx]}")
 
-# Visualizar el packing
-hr.visualizar_packing(placements, container_width, container_height)
+# Preparar los datos para el modelo
+X, Y = tr.pad_and_prepare_data(all_states, all_Y_rect)
+
+# División entrenamiento/validación
+X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+
+# Crear el modelo
+state_dim = X.shape[2]  # Dimensión del vector de estado
+num_actions = Y.shape[2]  # Número de acciones posibles
+max_seq_len = X.shape[1]  # Longitud máxima de las secuencias
+model = tr.create_model(state_dim, num_actions, max_seq_len)
+
+# Entrenar el modelo
+tr.train_model(model, X_train, Y_train, X_val, Y_val, max_seq_len)
+
+# Validar el modelo
+tr.validate_model(model, X_val, Y_val)

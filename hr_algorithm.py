@@ -65,6 +65,7 @@ def codificar_estado(spaces, rects, espacio_seleccionado):
         if s == espacio_seleccionado:
             idx_seleccionado = idx
             break
+
     estado = []
     # Codificar subespacios
     for idx, (x, y, w, h) in enumerate(spaces):
@@ -80,8 +81,20 @@ def codificar_estado(spaces, rects, espacio_seleccionado):
         estado.append([h, w, area, a_utilizar, contexto])
     return estado
 
+def codificar_y_estado(estado, rect):
+    """
+    Devuelve un vector one-hot Y del mismo largo que el estado,
+    con un 1 en la posición donde el bloque pendiente coincide con rect.
+    """
+    Y = [0] * len(estado)
+    # Buscar el primer bloque pendiente (contexto==0) que coincida con rect
+    for idx, v in enumerate(estado):
+        if v[4] == 0 and ((v[1], v[0]) == rect or (v[0], v[1]) == rect):  # (w, h) == rect
+            Y[idx] = 1
+            break
+    return Y
 
-def recursive_packing(space, spaces, rects, placed):
+def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None):
     while rects:
         for i, rect in enumerate(rects):
             # Verificar si el rectángulo cabe en el espacio
@@ -96,11 +109,15 @@ def recursive_packing(space, spaces, rects, placed):
                 # print(f"[Recursivo] Probando rectángulo {rect} en espacio {space} -> posición {pos}")
                 if ok:
                     placed.append((rect, pos))
-                    print(f"[Recursivo] Rectángulo {rect} colocado en {pos}")
-
+                    # print(f"[Recursivo] Rectángulo {rect} colocado en ({space[2]},{space[3]})")
                     # Dividir en nuevos S3 y S4 desde el subespacio actual
                     S3, S4 = divide_space_2(space, rect, pos)
                     # print(f"[Recursivo] División: S3={S3}, S4={S4}\n")
+                    temp_spaces = spaces.copy()
+                    temp_spaces.append(S3)
+                    temp_spaces.append(S4)
+
+                    # Y_rect.append(rect)
 
                     # Eliminar rectángulo usado
                     rects.pop(i)
@@ -110,12 +127,43 @@ def recursive_packing(space, spaces, rects, placed):
 
                     # print(f"Área S3: {area_S3}, {S3[2]},{S3[3]} Área S4: {area_S4}, {S4[2]},{S4[3]}")
                     if area_S3 > area_S4:
-                        recursive_packing(S3, spaces, rects, placed)
-                        recursive_packing(S4, spaces, rects, placed)
+                        if not rects:
+                            return  # Termina esta rama recursiva
+                        Y_rect.append(codificar_y_estado(estados[-1], rect))
+                        estado = codificar_estado(temp_spaces, rects, S3)
+                        estados.append(estado)
+
+                        recursive_packing(S3, spaces, rects, placed, estados, Y_rect)
+                        temp_spaces.remove(S3)
+
+                        if not rects:
+                            return
+
+                        Y_rect.append(codificar_y_estado(estados[-1], rect))
+                        estado = codificar_estado(temp_spaces, rects, S4)
+                        estados.append(estado)
+
+                        recursive_packing(S4, spaces, rects, placed, estados, Y_rect)
+                        temp_spaces.remove(S4)
                     else:
-                        recursive_packing(S4, spaces, rects, placed)
-                        recursive_packing(S3, spaces, rects, placed)
-                
+                        if not rects:
+                            return  # Termina esta rama recursiva
+                        Y_rect.append(codificar_y_estado(estados[-1], rect))
+                        estado = codificar_estado(temp_spaces, rects, S4)
+                        estados.append(estado)
+
+                        recursive_packing(S4, spaces, rects, placed, estados, Y_rect)
+                        temp_spaces.remove(S4)
+                        
+                        if not rects:
+                            return  # Termina esta rama recursiva
+
+                        Y_rect.append(codificar_y_estado(estados[-1], rect))
+                        estado = codificar_estado(temp_spaces, rects, S3)
+                        estados.append(estado)
+
+                        recursive_packing(S3, spaces, rects, placed, estados, Y_rect)
+                        temp_spaces.remove(S3)
 
                     return  # Termina esta rama recursiva
         break  # Si ningún rectángulo cabe, se termina
@@ -124,10 +172,10 @@ def hr_packing(spaces, rects):
     placed = []
     rects1 = rects.copy()
 
-    temp_spaces = []
     estados = []  # Lista para almacenar los estados codificados
     Y_rect = []  # Lista para almacenar los índices de los rectángulos elegidos
-    estados.append(codificar_estado(spaces, rects1, spaces[0]))  # Estado inicial
+    estado = codificar_estado(spaces, rects1, spaces[0])  # Estado inicial
+    estados.append(estado)  # Estado inicial
 
     while rects1:
         placed_flag = False
@@ -138,27 +186,38 @@ def hr_packing(spaces, rects):
                     ok, pos = place_rect(space, rect)
                     # print(f"Probando rectángulo {rect} en espacio {space} -> posición {pos}")
                     if ok:
+
+                        #temp_spaces = spaces.copy() 
+                        temp_spaces = []
                         placed.append((rect, pos))
-                        print(f"Rectángulo {rect} colocado en {pos}")
+                        # print(f"Rectángulo {rect} colocado en ({space[2]},{space[3]})")
+
+                        Y_rect.append(codificar_y_estado(estado, rect))
 
                         # Dividir el espacio en S1 (encima, unbounded) y S2 (derecha, bounded)
                         S1, S2 = divide_space(space, rect, pos)
                         temp_spaces.append(S1)
                         temp_spaces.append(S2)
-                        estados.append(codificar_estado(spaces, rects1, S2))
                         # print(f"Dividiendo espacio {space} en S1={S1} (encima) y S2={S2} (derecha)\n")
 
                         # Eliminar rectángulo insertado y espacio usado
                         rects1.pop(i)
                         spaces.remove(space)
                         
+                        estado = codificar_estado(temp_spaces, rects1, S2)
+                        estados.append(estado)
+
                         # Agregar S1 al espacio disponible para seguir iterando
                         spaces.append(S1)
                         # Llamar recursivamente a RecursivePacking con S2 (bounded)
-                        temp_spaces.remove(S2)
-                        recursive_packing(S2, spaces, rects1, placed, estados, Y_rect, temp_spaces)
+                        # temp_spaces.remove(S2)
+                        recursive_packing(S2, spaces, rects1, placed, estados, Y_rect)
 
                         placed_flag = True
+
+                        estado = codificar_estado(spaces, rects1, S1)
+                        estados.append(estado)
+                        Y_rect.append(codificar_y_estado(estado, rect))
                         break
             if placed_flag:
                 break
@@ -166,7 +225,7 @@ def hr_packing(spaces, rects):
         if not placed_flag:
             break
 
-    return placed
+    return placed, estados, Y_rect
 
 # ----------------------------
 def ordenar_por_area(rects):
@@ -188,7 +247,7 @@ def heuristic_recursion(rects, container_width):
         for j in range(i + 1, len(rects)):
             temp_rects = rects.copy()
             temp_rects[i], temp_rects[j] = temp_rects[j], temp_rects[i]
-            print(f"Probando permutación: {temp_rects}")
+            # print(f"Probando permutación: {temp_rects}")
             placements, estados, Y_rect = hr_packing(
                 spaces=[(0, 0, container_width, 1000)],
                 rects=temp_rects 
@@ -196,13 +255,16 @@ def heuristic_recursion(rects, container_width):
             used_heights = [pos[1] + rect[1] for rect, pos in placements]
             altura = max(used_heights) if used_heights else 0
 
-            # if altura <= best_height:
+            if altura <= best_height:
                 # print(f"Mejor altura encontrada: {altura} con rectángulos {temp_rects}")
-            rect_sequence = temp_rects.copy()
-            best_height = altura
-            best_placements = placements
+                rect_sequence = temp_rects.copy()
+                best_height = altura
+                best_placements = placements
+
+
             all_states.append(estados)
             all_Y_rect.append(Y_rect)
+    
 
     return best_placements, best_height, rect_sequence, all_states, all_Y_rect
 # ----------------------------
