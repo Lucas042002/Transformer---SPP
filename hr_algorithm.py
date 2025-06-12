@@ -109,6 +109,8 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None):
                 # print(f"[Recursivo] Probando rectángulo {rect} en espacio {space} -> posición {pos}")
                 if ok:
                     placed.append((rect, pos))
+                    Y_rect.append(codificar_y_estado(estados[-1], rect))
+
                     # print(f"[Recursivo] Rectángulo {rect} colocado en ({space[2]},{space[3]})")
                     # Dividir en nuevos S3 y S4 desde el subespacio actual
                     S3, S4 = divide_space_2(space, rect, pos)
@@ -124,12 +126,12 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None):
                     # Mostrar cuál espacio es más grande: S3 o S4
                     area_S3 = S3[2] * S3[3]
                     area_S4 = S4[2] * S4[3]
+                    
+                    if not rects:
+                        return  
 
                     # print(f"Área S3: {area_S3}, {S3[2]},{S3[3]} Área S4: {area_S4}, {S4[2]},{S4[3]}")
                     if area_S3 > area_S4:
-                        if not rects:
-                            return  # Termina esta rama recursiva
-                        Y_rect.append(codificar_y_estado(estados[-1], rect))
                         estado = codificar_estado(temp_spaces, rects, S3)
                         estados.append(estado)
 
@@ -137,7 +139,7 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None):
                         temp_spaces.remove(S3)
 
                         if not rects:
-                            return
+                            return # Termina esta rama recursiva
 
                         Y_rect.append(codificar_y_estado(estados[-1], rect))
                         estado = codificar_estado(temp_spaces, rects, S4)
@@ -145,10 +147,7 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None):
 
                         recursive_packing(S4, spaces, rects, placed, estados, Y_rect)
                         temp_spaces.remove(S4)
-                    else:
-                        if not rects:
-                            return  # Termina esta rama recursiva
-                        Y_rect.append(codificar_y_estado(estados[-1], rect))
+                    else:                        
                         estado = codificar_estado(temp_spaces, rects, S4)
                         estados.append(estado)
 
@@ -194,6 +193,7 @@ def hr_packing(spaces, rects):
 
                         Y_rect.append(codificar_y_estado(estado, rect))
 
+
                         # Dividir el espacio en S1 (encima, unbounded) y S2 (derecha, bounded)
                         S1, S2 = divide_space(space, rect, pos)
                         temp_spaces.append(S1)
@@ -203,28 +203,31 @@ def hr_packing(spaces, rects):
                         # Eliminar rectángulo insertado y espacio usado
                         rects1.pop(i)
                         spaces.remove(space)
-                        
-                        estado = codificar_estado(temp_spaces, rects1, S2)
-                        estados.append(estado)
 
+                        if rects1:  # Solo codificar el estado si quedan rectángulos
+                            estado = codificar_estado(temp_spaces, rects1, S2)
+                            estados.append(estado)
+                            
                         # Agregar S1 al espacio disponible para seguir iterando
                         spaces.append(S1)
                         # Llamar recursivamente a RecursivePacking con S2 (bounded)
                         # temp_spaces.remove(S2)
+
                         recursive_packing(S2, spaces, rects1, placed, estados, Y_rect)
+                        if rects1:
+                            Y_rect.append(codificar_y_estado(estados[-1], rect))
 
                         placed_flag = True
 
                         estado = codificar_estado(spaces, rects1, S1)
                         estados.append(estado)
-                        Y_rect.append(codificar_y_estado(estado, rect))
-                        break
+                        
+                        break  
             if placed_flag:
                 break
-
         if not placed_flag:
             break
-
+    Y_rect.append(codificar_y_estado(estado, rect))         
     return placed, estados, Y_rect
 
 # ----------------------------
