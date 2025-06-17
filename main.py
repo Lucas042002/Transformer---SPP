@@ -4,6 +4,7 @@ import hr_transformer as hr_tr
 import torch
 import torch.nn as nn
 import random
+import numpy as np
 # ----------------------------
 # Datos del problema
 # ----------------------------
@@ -110,12 +111,12 @@ def generate_problems_from_file(filepath):
 # ----------------------------
 # Elegir categoría y cantidad de problemas
 categoria = "C1"  # Cambia aquí la categoría
-cantidad = 1      # Cambia aquí la cantidad de problemas a generar
+cantidad = 4      # Cambia aquí la cantidad de problemas a generar
 exportar = False  # Cambia a True si quieres guardar los archivos
-# problemas, ancho, alto = generate_problems(categoria, cantidad, export=exportar)
+problemas, ancho, alto = generate_problems(categoria, cantidad, export=exportar)
 
-problemas = generate_problems_from_file("c1p1.txt")
-ancho, alto = CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"]
+# problemas = generate_problems_from_file("c1p1.txt")
+# ancho, alto = CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"]
 
 
 # ----------------------------
@@ -141,21 +142,44 @@ for idx, rects in enumerate(problemas):
 if all_states_total is not None:
     print(f"\nCantidad de secuencias de estados generadas: {len(all_states_total), len(all_Y_rect_total)}")
 
-largo_max = CATEGORIES[categoria]["num_items"] 
+largo_max = CATEGORIES[categoria]["num_items"] + 1
 
 train_loader, val_loader, input_seq_length, output_seq_length = tr.procesar_datos_entrada(
     largo_max, all_states_total, all_Y_rect_total, verbose=False)
 
 # Modelo
 input_dim = 5
-num_heads = 8
-head_dim = 16
-num_layers = 6
+num_layers = 3
+num_heads = 3
+head_dim = 9
 num_classes = largo_max  # O el número real de posibles acciones por paso
 
 model = tr.CustomModel(input_dim=input_dim, num_heads=num_heads, head_dim=head_dim, num_layers=num_layers, num_classes=num_classes)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-criterion = nn.CrossEntropyLoss()
+
+Y = []
+for estados, acciones in zip(all_states_total, all_Y_rect_total):
+    for state, action in zip(estados, acciones):
+        if isinstance(action, list) or isinstance(action, np.ndarray):
+            if np.sum(action) == 0:
+                Y.append(0)
+            else:
+                Y.append(int(np.argmax(action)))
+        else:
+            Y.append(int(action))
+Y = np.array(Y)
+
+# Calcula los pesos inversos a la frecuencia
+num_classes = largo_max
+counts = np.bincount(Y, minlength=num_classes)
+weights = 1.0 / (counts + 1e-6)
+weights = weights / weights.sum() * num_classes  # Normaliza para que sumen num_classes
+weights = torch.tensor(weights, dtype=torch.float32)
+
+print("Pesos para CrossEntropyLoss:", weights)
+
+criterion = nn.CrossEntropyLoss(weight=weights)
+
 
 
 tr.entrenamiento(model, train_loader, val_loader, optimizer, criterion)
@@ -171,7 +195,7 @@ tr.entrenamiento(model, train_loader, val_loader, optimizer, criterion)
 
 # Lista de 10 secuencias de estados (cada una es una lista de listas)
 test_states = [
-    [[1000, 20, 20000, 1, 1], [5, 6, 30, 0, 0], [4, 8, 32, 0, 0], [7, 4, 28, 0, 0], [4, 7, 28, 0, 0], [9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [5, 5, 25, 0, 0], [5, 5, 25, 0, 0], [4, 6, 24, 0, 0], [3, 8, 24, 0, 0], [7, 3, 21, 0, 0], [3, 7, 21, 0, 0], [6, 3, 18, 0, 0], [4, 4, 16, 0, 0], [3, 5, 15, 0, 0], [6, 2, 12, 0, 0]],
+    [ [5, 6, 30, 0, 0], [1000, 20, 20000, 1, 1], [4, 8, 32, 0, 0], [4, 7, 28, 0, 0],  [7, 4, 28, 0, 0],[9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [5, 5, 25, 0, 0], [5, 5, 25, 0, 0], [4, 6, 24, 0, 0], [3, 8, 24, 0, 0], [7, 3, 21, 0, 0], [3, 7, 21, 0, 0], [6, 3, 18, 0, 0], [4, 4, 16, 0, 0], [3, 5, 15, 0, 0], [6, 2, 12, 0, 0]],
     [[995, 20, 19900, 0, 1], [5, 14, 70, 1, 1], [4, 8, 32, 0, 0], [7, 4, 28, 0, 0], [4, 7, 28, 0, 0], [9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [5, 5, 25, 0, 0], [5, 5, 25, 0, 0], [4, 6, 24, 0, 0], [3, 8, 24, 0, 0], [7, 3, 21, 0, 0], [3, 7, 21, 0, 0], [6, 3, 18, 0, 0], [4, 4, 16, 0, 0], [3, 5, 15, 0, 0], [6, 2, 12, 0, 0]],
     [[995, 20, 19900, 0, 1], [5, 6, 30, 1, 1], [1, 8, 8, 0, 1], [7, 4, 28, 0, 0], [4, 7, 28, 0, 0], [9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [5, 5, 25, 0, 0], [5, 5, 25, 0, 0], [4, 6, 24, 0, 0], [3, 8, 24, 0, 0], [7, 3, 21, 0, 0], [3, 7, 21, 0, 0], [6, 3, 18, 0, 0], [4, 4, 16, 0, 0], [3, 5, 15, 0, 0], [6, 2, 12, 0, 0]],
     [[995, 20, 19900, 0, 1], [5, 1, 5, 1, 1], [0, 5, 0, 0, 1], [7, 4, 28, 0, 0], [4, 7, 28, 0, 0], [9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [9, 3, 27, 0, 0], [5, 5, 25, 0, 0], [4, 6, 24, 0, 0], [3, 8, 24, 0, 0], [7, 3, 21, 0, 0], [3, 7, 21, 0, 0], [6, 3, 18, 0, 0], [4, 4, 16, 0, 0], [3, 5, 15, 0, 0], [6, 2, 12, 0, 0], [0, 0, 0, 0, 0]],
@@ -188,23 +212,25 @@ test_states = [
 # model.eval()
 # with torch.no_grad():
 #     for i, seq in enumerate(test_states):
-#         # Convertir a tensor, asegurando tipo float32
 #         x = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)  # (1, seq_len, 5)
-#         logits = model(x)  # (1, seq_len, num_classes)
-#         probs = torch.softmax(logits, dim=-1)
-#         pred = torch.argmax(probs, dim=-1)  # (1, seq_len)
+#         logits = model(x)  # (1, num_classes)
+#         probs = torch.softmax(logits, dim=-1)  # (1, num_classes)
+#         pred = torch.argmax(probs, dim=-1)     # (1,)
+#         top3 = torch.topk(probs, 3, dim=-1)
 #         print(f"Secuencia {i+1}:")
-#         print(f"(Probabilidades: {probs[0,-1].tolist()})")
+#         print(f"  Índice predicho: {pred.item()}")
+#         print(f"  Probabilidades: {probs[0].cpu().numpy().round(3).tolist()}")
+#         print(f"  Top 3 índices: {top3.indices[0].cpu().numpy().tolist()} (probs: {top3.values[0].cpu().numpy().round(10).tolist()})")
 #         print()
 
 
-# for idx, rects in enumerate(problemas):
-#     print(f"\nResolviendo problema {idx+1} con el modelo")
-#     placements, estados, Y_rect = hr_tr.hr_packing_con_modelo(
-#         spaces=[(0, 0, ancho, alto)],
-#         rects=rects.copy(),
-#         model=model,
-#         device="cpu"  # Cambia a "cuda" si tienes GPU disponible
-#     )
-#     print(f"Packing con modelo, altura final: {hr_tr.calcular_altura(placements)}")
-#     hr.visualizar_packing(placements, ancho, alto)
+for idx, rects in enumerate(problemas):
+    print(f"\nResolviendo problema {idx+1} con el modelo")
+    placements, estados, Y_rect = hr_tr.hr_packing_con_modelo(
+        spaces=[(0, 0, ancho, 1000)],
+        rects=rects.copy(),
+        model=model,
+        device="cpu"  # Cambia a "cuda" si tienes GPU disponible
+    )
+    print(f"Packing con modelo, altura final: {hr_tr.calcular_altura(placements)}")
+    hr.visualizar_packing(placements, ancho, alto)

@@ -191,6 +191,8 @@ def hr_packing_con_modelo(spaces, rects, model, device="cpu"):
     estados.append(estado)
 
     while rects1:
+        colocado = False
+
         # Prepara el estado para el modelo
         x = torch.tensor([estado], dtype=torch.float32).to(device)  # [1, seq_len, features]
         with torch.no_grad():
@@ -212,8 +214,6 @@ def hr_packing_con_modelo(spaces, rects, model, device="cpu"):
         print(f"Intentando colocar rectángulo {rect} (acción {action})")
 
         # Busca un espacio donde quepa
-        colocado = False
-
         for space in spaces:
 
             fits, rotation = hr.rect_fits_in_space(rect, space)

@@ -72,41 +72,46 @@ class CustomModel(nn.Module):
 
         # Aplicar cada capa de atención y densa
         for layer in self.layers:
-            x_proj = x_proj.permute(1, 0, 2)  # [seq_length, batch_size, num_heads*head_dim]
-            attn_output, _ = layer['multihead_attention'](x_proj, x_proj, x_proj, attn_mask=attn_mask)
-            attn_output = attn_output.permute(1, 0, 2)  # [batch_size, seq_length, num_heads*head_dim]
-            x_proj = x_proj.permute(1, 0, 2)  # [batch_size, seq_length, num_heads*head_dim]
+            x_proj = x_proj.permute(1, 0, 2)
+            attn_output, _ = layer['multihead_attention'](x_proj, x_proj, x_proj)
+            attn_output = attn_output.permute(1, 0, 2)
+            x_proj = x_proj.permute(1, 0, 2)
             attn_output = layer['norm1'](attn_output + x_proj)
             dense_output = layer['dense_layer'](attn_output)
             x_proj = layer['norm2'](dense_output + attn_output)
 
-        # Aplicar capa de salida final
-        output = self.final_output_layer(x_proj, return_probabilities)
-        return output
+        # Pooling: usa el primer paso (puedes cambiar a mean o last)
+        pooled = x_proj[:, 0, :]  # [batch_size, hidden_dim]
+        output = self.final_output_layer.output_projection(pooled)  # [batch_size, num_classes]
+        if return_probabilities:
+            return F.softmax(output, dim=-1)
+        else:
+            return output
+    
 
 def procesar_datos_entrada(largo_max, all_states, all_Y_rect, verbose=False):
-    sum = 0
+    suma = 0
     for i, all_state in enumerate(all_states):
         for j, state in enumerate(all_state):
             if len(state) < largo_max:
                 # Rellenar con [0,0,0,0,0] hasta alcanzar largo_max
                 state += [[0, 0, 0, 0, 0]] * (largo_max - len(state))
-            sum += len(state)
+            suma += len(state)
 
 
     if verbose:
-        print(f"Total de estados procesados: {sum}")
-    sum = 0
+        print(f"Total de estados procesados: {suma}")
+    suma = 0
     # Asegurarse de que todas las acciones tengan el mismo largo
     for i, state in enumerate(all_Y_rect):
         for j, action in enumerate(state):
             if len(action) < largo_max:
                 # Rellenar con 0 hasta alcanzar largo_max
                 action += [0] * (largo_max - len(action))
-            sum += len(action)
+            suma += len(action)
 
     if verbose:
-        print(f"Total de acciones procesadas: {sum}")
+        print(f"Total de acciones procesadas: {suma}")
 
     # Filtrar estados y acciones donde all_Y_rect es solo ceros
     all_states_filtrado = []
@@ -128,74 +133,65 @@ def procesar_datos_entrada(largo_max, all_states, all_Y_rect, verbose=False):
 
     X = []
     Y = []
-    for i, seq in enumerate(all_states):
-        for j, state in enumerate(seq):
-            # state ya es una lista de largo_max x 5
+    for estados, acciones in zip(all_states, all_Y_rect):
+        for state, action in zip(estados, acciones):
             X.append(state)
+            # Convierte one-hot a índice (o 0 si todo es cero)
+            if isinstance(action, list) or isinstance(action, np.ndarray):
+                if np.sum(action) == 0:
+                    Y.append(0)
+                else:
+                    Y.append(int(np.argmax(action)))
+            else:
+                Y.append(int(action))
 
+    X = np.array(X)  # shape: (num_samples, largo_max, 5)
 
-    for i, seq in enumerate(all_Y_rect):
-        for j, action in enumerate(seq):
-            # action ya es una lista de largo_max
-            Y.append(action)
+    X = X.astype(np.float32)
+    
+    for i in range(X.shape[-1]):
+        max_val = np.abs(X[..., i]).max()
+        if max_val > 0:
+            X[..., i] /= max_val
 
+    Y = np.array(Y)  # shape: (num_samples,)
+
+    if verbose:
+        print(np.bincount(Y))  # Y es tu vector de etiquetas
 
     if verbose:
         print(f"Total de secuencias X: {len(X)}")
-        print(f"Total de secuencias Y: {len(Y)}")
-        print("Primeros 10 X:")
-        for i in range(min(10, len(X))):
-            print(X[i])
-        print("Primeros 10 Y:")
-        for i in range(min(10, len(Y))):
-            print(Y[i])
+        print(f"Total de etiquetas Y: {len(Y)}")
+        print("Primeros 5 X:", X[:5])
+        print("Primeros 5 Y:", Y[:5])
 
-    # 2. Convertir a numpy array y luego a tensor
-    X = np.array(X)  # shape: (num_samples, largo_max, 5)
-    if all_Y_rect is not None:
-        Y = np.array(Y)  # shape: (num_samples, largo_max, num_actions)
-    # 3. Convertir a tensor
     X_tensor = torch.tensor(X, dtype=torch.float32)
-    if all_Y_rect is not None:
-        Y_tensor = torch.tensor(Y, dtype=torch.float32)
-
-    if verbose:
-        print("X_tensor shape:", X_tensor.shape)
-    if all_Y_rect is not None:
-        print("Y_tensor shape:", Y_tensor.shape)
-
-
-    # Si Y_tensor es one-hot, conviértelo a índices
-    if Y_tensor.ndim == 3 and Y_tensor.shape[-1] > 1:
-        Y_tensor = Y_tensor.argmax(dim=-1)
+    Y_tensor = torch.tensor(Y, dtype=torch.long)
 
     # División entrenamiento/validación
     X_train, X_val, Y_train, Y_val = train_test_split(X_tensor, Y_tensor, test_size=0.2, random_state=42)
 
-    # Crear DataLoaders
-    batch_size = 32
+    batch_size = 16
     train_dataset = TensorDataset(X_train, Y_train)
     val_dataset = TensorDataset(X_val, Y_val)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
-    return train_loader, val_loader, len(X_train[0]), len(Y_train[0])  # Retorna los DataLoaders y el largo de las secuencias
-
+    return train_loader, val_loader, X_tensor.shape[1], 1  # output_seq_length=1
 
 def entrenamiento(model, train_loader, val_loader, optimizer, criterion):
-    # Entrenamiento
-    epochs = 5
+    epochs = 50
     train_losses = []
     val_accuracies = []
 
     for epoch in range(epochs):
+        test = 'debug3'  # Cambiar a 'debug' para imprimir información de depuración
         model.train()
         total_loss = 0
         for xb, yb in train_loader:
             optimizer.zero_grad()
-            logits = model(xb)  # [batch, seq_len, num_classes]
-            logits = logits.permute(0, 2, 1)  # [batch, num_classes, seq_len]
-            loss = criterion(logits, yb.long())
+            logits = model(xb)  # [batch, num_classes]
+            loss = criterion(logits, yb)  # yb: [batch]
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
@@ -207,25 +203,25 @@ def entrenamiento(model, train_loader, val_loader, optimizer, criterion):
         model.eval()
         correct = 0
         total = 0
-        test = 1
         with torch.no_grad():
             for xb, yb in val_loader:
                 logits = model(xb)
-                preds = logits.argmax(dim=-1)
-                correct += (preds == yb).sum().item()
-                total += yb.numel()
-                if test == 1:
-                    print(f"  Último batch - xb: {xb.shape}, yb: {yb.shape}, logits: {logits.shape}")
-                    print(f"xb: {xb[0]}")
-                    print(f"yb (real): {yb[0]}")
-                    print(f"Predicción: {preds[0]}")
-                    print(f"Logits: {logits[0]}")
-                print(f"  Validación - Correctos: {correct}, Total: {total}")
-                test += 1
-        acc = correct / total
-        val_accuracies.append(acc)
-        print(f"  Validación accuracy: {acc:.4f}")
+                preds = logits.argmax(dim=-1)  # [batch]
+                mask = (yb != 0)
+                aciertos = (preds == yb) & mask
+                correct += aciertos.sum().item()
+                total += mask.sum().item()
+                if test == 'debug':
+                    print(f"  Validación - Epoch {epoch+1}/{epochs}")
+                    print(f"  xb {xb.shape} ")
+                    print(f"  yb {yb.shape} {yb}")
+                    print(f"  preds {preds.shape} {preds}")
+                    print(f"  logits {logits.shape} {logits}")
+                    test = 'debug2'
 
+        acc = correct / total if total > 0 else 0
+        val_accuracies.append(acc)
+        print(f"  Validación accuracy (solo relevantes): {acc:.4f}")
 
     torch.save(model.state_dict(), 'SPP_transfomer_insano.pth')
 
