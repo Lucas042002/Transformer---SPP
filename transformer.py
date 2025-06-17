@@ -108,6 +108,24 @@ def procesar_datos_entrada(largo_max, all_states, all_Y_rect, verbose=False):
     if verbose:
         print(f"Total de acciones procesadas: {sum}")
 
+    # Filtrar estados y acciones donde all_Y_rect es solo ceros
+    all_states_filtrado = []
+    all_Y_rect_filtrado = []
+    for estados, acciones in zip(all_states, all_Y_rect):
+        nuevos_estados = []
+        nuevas_acciones = []
+        for estado, accion in zip(estados, acciones):
+            if not (isinstance(accion, list) and all(a == 0 for a in accion)):
+                nuevos_estados.append(estado)
+                nuevas_acciones.append(accion)
+        if nuevos_estados:  # Solo agregar si hay al menos un estado válido
+            all_states_filtrado.append(nuevos_estados)
+            all_Y_rect_filtrado.append(nuevas_acciones)
+
+    # Usa los filtrados para el resto del procesamiento
+    all_states = all_states_filtrado
+    all_Y_rect = all_Y_rect_filtrado
+
     X = []
     Y = []
     for i, seq in enumerate(all_states):
@@ -125,10 +143,10 @@ def procesar_datos_entrada(largo_max, all_states, all_Y_rect, verbose=False):
     if verbose:
         print(f"Total de secuencias X: {len(X)}")
         print(f"Total de secuencias Y: {len(Y)}")
-        print("Primeros 100 X:")
+        print("Primeros 10 X:")
         for i in range(min(10, len(X))):
             print(X[i])
-        print("Primeros 100 Y:")
+        print("Primeros 10 Y:")
         for i in range(min(10, len(Y))):
             print(Y[i])
 
@@ -166,7 +184,7 @@ def procesar_datos_entrada(largo_max, all_states, all_Y_rect, verbose=False):
 
 def entrenamiento(model, train_loader, val_loader, optimizer, criterion):
     # Entrenamiento
-    epochs = 50
+    epochs = 5
     train_losses = []
     val_accuracies = []
 
@@ -189,12 +207,21 @@ def entrenamiento(model, train_loader, val_loader, optimizer, criterion):
         model.eval()
         correct = 0
         total = 0
+        test = 1
         with torch.no_grad():
             for xb, yb in val_loader:
                 logits = model(xb)
                 preds = logits.argmax(dim=-1)
                 correct += (preds == yb).sum().item()
                 total += yb.numel()
+                if test == 1:
+                    print(f"  Último batch - xb: {xb.shape}, yb: {yb.shape}, logits: {logits.shape}")
+                    print(f"xb: {xb[0]}")
+                    print(f"yb (real): {yb[0]}")
+                    print(f"Predicción: {preds[0]}")
+                    print(f"Logits: {logits[0]}")
+                print(f"  Validación - Correctos: {correct}, Total: {total}")
+                test += 1
         acc = correct / total
         val_accuracies.append(acc)
         print(f"  Validación accuracy: {acc:.4f}")

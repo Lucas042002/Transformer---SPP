@@ -90,6 +90,21 @@ def generate_problems(category, n_problems=3, export=False):
                 raise RuntimeError("No se pudo generar un problema válido tras muchos intentos.")
     return problems, cat["width"], cat["height"]
 
+def generate_problems_from_file(filepath):
+    """
+    Lee un archivo de problema (como c1p1.txt) y devuelve una lista de rectángulos [(w, h), ...].
+    """
+    rects = []
+    with open(filepath, "r") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            parts = line.strip().split()
+            if len(parts) < 2:
+                continue
+            h, w = map(int, parts)
+            rects.append((w, h))
+    return [rects]  # Para mantener compatibilidad con el resto del flujo
 
 
 # ----------------------------
@@ -97,36 +112,10 @@ def generate_problems(category, n_problems=3, export=False):
 categoria = "C1"  # Cambia aquí la categoría
 cantidad = 1      # Cambia aquí la cantidad de problemas a generar
 exportar = False  # Cambia a True si quieres guardar los archivos
-problemas, ancho, alto = generate_problems(categoria, cantidad, export=exportar)
+# problemas, ancho, alto = generate_problems(categoria, cantidad, export=exportar)
 
-# def analizar_aspect_ratios_y_areas(nombre_archivo):
-    # with open(nombre_archivo, "r") as f:
-    #     lines = f.readlines()
-    # ratios = []
-    # areas = []
-    # for line in lines:
-    #     if not line.strip():
-    #         continue
-    #     partes = line.strip().split()
-    #     if len(partes) < 2:
-    #         continue
-    #     h, w = map(int, partes)
-    #     aspect = max(w / h, h / w)
-    #     area = w * h
-    #     ratios.append(aspect)
-    #     areas.append(area)
-    # print(f"Aspect ratios en {nombre_archivo}:")
-    # print(" ".join(f"{r:.2f}" for r in ratios))
-    # print(f"Min: {min(ratios):.2f}, Max: {max(ratios):.2f}, Promedio: {sum(ratios)/len(ratios):.2f}")
-    # print(f"Áreas en {nombre_archivo}:")
-    # print(" ".join(f"{a}" for a in areas))
-    # print(f"Área total: {sum(areas)}, Área promedio: {sum(areas)/len(areas):.2f}")
-
-# Ejemplo de uso:
-# analizar_aspect_ratios_y_areas("c1p1.txt")
-# analizar_aspect_ratios_y_areas("c1_random_1.txt")
-# analizar_aspect_ratios_y_areas("c1_random_2.txt")
-# analizar_aspect_ratios_y_areas("c1_random_3.txt")
+problemas = generate_problems_from_file("c1p1.txt")
+ancho, alto = CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"]
 
 
 # ----------------------------
@@ -146,13 +135,13 @@ for idx, rects in enumerate(problemas):
 
 
 # Visualizar el packing
-hr.visualizar_packing(placements, CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"])
+# hr.visualizar_packing(placements, CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"])
 
 # Mostrar estados y los índices de los rectángulos elegidos si están disponibles
 if all_states_total is not None:
     print(f"\nCantidad de secuencias de estados generadas: {len(all_states_total), len(all_Y_rect_total)}")
 
-largo_max = CATEGORIES[categoria]["num_items"] + 1
+largo_max = CATEGORIES[categoria]["num_items"] 
 
 train_loader, val_loader, input_seq_length, output_seq_length = tr.procesar_datos_entrada(
     largo_max, all_states_total, all_Y_rect_total, verbose=False)
@@ -169,12 +158,12 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 criterion = nn.CrossEntropyLoss()
 
 
-# tr.entrenamiento(model, train_loader, val_loader, optimizer, criterion)
+tr.entrenamiento(model, train_loader, val_loader, optimizer, criterion)
 
-model_path = "SPP_transfomer_insano.pth"  # Cambia por tu ruta real
-model.load_state_dict(torch.load(model_path, map_location="cpu"))  # Usa "cuda" si tienes GPU
-model.eval()
-print("Modelo cargado correctamente.")
+# model_path = "SPP_transfomer_insano.pth"  # Cambia por tu ruta real
+# model.load_state_dict(torch.load(model_path, map_location="cpu"))  # Usa "cuda" si tienes GPU
+# model.eval()
+# print("Modelo cargado correctamente.")
 
 # ----------------------------
 # Probar el modelo con los 10 estados dados
@@ -196,17 +185,17 @@ test_states = [
 
 # Convertir a tensores y pasar por el modelo
 
-model.eval()
-with torch.no_grad():
-    for i, seq in enumerate(test_states):
-        # Convertir a tensor, asegurando tipo float32
-        x = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)  # (1, seq_len, 5)
-        logits = model(x)  # (1, seq_len, num_classes)
-        probs = torch.softmax(logits, dim=-1)
-        pred = torch.argmax(probs, dim=-1)  # (1, seq_len)
-        print(f"Secuencia {i+1}:")
-        print(f"(Probabilidades: {probs[0,-1].tolist()})")
-        print()
+# model.eval()
+# with torch.no_grad():
+#     for i, seq in enumerate(test_states):
+#         # Convertir a tensor, asegurando tipo float32
+#         x = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)  # (1, seq_len, 5)
+#         logits = model(x)  # (1, seq_len, num_classes)
+#         probs = torch.softmax(logits, dim=-1)
+#         pred = torch.argmax(probs, dim=-1)  # (1, seq_len)
+#         print(f"Secuencia {i+1}:")
+#         print(f"(Probabilidades: {probs[0,-1].tolist()})")
+#         print()
 
 
 # for idx, rects in enumerate(problemas):
