@@ -90,28 +90,19 @@ class CustomModel(nn.Module):
     
 
 def procesar_datos_entrada(largo_max, all_states, all_Y_rect, verbose=False):
-    suma = 0
+    
     for i, all_state in enumerate(all_states):
         for j, state in enumerate(all_state):
             if len(state) < largo_max:
                 # Rellenar con [0,0,0,0,0] hasta alcanzar largo_max
                 state += [[0, 0, 0, 0, 0]] * (largo_max - len(state))
-            suma += len(state)
 
-
-    if verbose:
-        print(f"Total de estados procesados: {suma}")
-    suma = 0
     # Asegurarse de que todas las acciones tengan el mismo largo
     for i, state in enumerate(all_Y_rect):
         for j, action in enumerate(state):
             if len(action) < largo_max:
                 # Rellenar con 0 hasta alcanzar largo_max
                 action += [0] * (largo_max - len(action))
-            suma += len(action)
-
-    if verbose:
-        print(f"Total de acciones procesadas: {suma}")
 
     # Filtrar estados y acciones donde all_Y_rect es solo ceros
     all_states_filtrado = []
@@ -162,8 +153,8 @@ def procesar_datos_entrada(largo_max, all_states, all_Y_rect, verbose=False):
     if verbose:
         print(f"Total de secuencias X: {len(X)}")
         print(f"Total de etiquetas Y: {len(Y)}")
-        print("Primeros 5 X:", X[:5])
-        print("Primeros 5 Y:", Y[:5])
+        # print("Primeros 5 X:", X[:5])
+        # print("Primeros 5 Y:", Y[:5])
 
     X_tensor = torch.tensor(X, dtype=torch.float32)
     Y_tensor = torch.tensor(Y, dtype=torch.long)
@@ -171,7 +162,7 @@ def procesar_datos_entrada(largo_max, all_states, all_Y_rect, verbose=False):
     # División entrenamiento/validación
     X_train, X_val, Y_train, Y_val = train_test_split(X_tensor, Y_tensor, test_size=0.2, random_state=42)
 
-    batch_size = 16
+    batch_size = 32
     train_dataset = TensorDataset(X_train, Y_train)
     val_dataset = TensorDataset(X_val, Y_val)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -179,8 +170,7 @@ def procesar_datos_entrada(largo_max, all_states, all_Y_rect, verbose=False):
 
     return train_loader, val_loader, X_tensor.shape[1], 1  # output_seq_length=1
 
-def entrenamiento(model, train_loader, val_loader, optimizer, criterion):
-    epochs = 50
+def entrenamiento(model, train_loader, val_loader, optimizer, criterion, epochs=50, categoria=None):
     train_losses = []
     val_accuracies = []
 
@@ -223,7 +213,7 @@ def entrenamiento(model, train_loader, val_loader, optimizer, criterion):
         val_accuracies.append(acc)
         print(f"  Validación accuracy (solo relevantes): {acc:.4f}")
 
-    torch.save(model.state_dict(), 'SPP_transfomer_insano.pth')
+    torch.save(model.state_dict(), f'SPP_transformer_{categoria}.pth')
 
     # Visualización de la curva de pérdida y accuracy
     plt.figure(figsize=(12,5))
@@ -240,4 +230,8 @@ def entrenamiento(model, train_loader, val_loader, optimizer, criterion):
     plt.ylabel('Accuracy')
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig(f'training_curves_{categoria}.png')
+    plt.close()
+
+
+

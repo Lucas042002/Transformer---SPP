@@ -1,5 +1,6 @@
 import hr_algorithm as hr
 import torch
+import numpy as np
 
 # ----------------------------
 # Funciones del algoritmo HR (simplificado)
@@ -88,7 +89,7 @@ def divide_space_2(space, rect, pos):
 
     return S3, S4
 
-def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, largo_max ,model, device="cpu"):
+def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, largo_max ,model, device="cpu", acciones_modelo=None, logits_modelo=None):
     if not rects:
         return
 
@@ -98,22 +99,31 @@ def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, 
     # Prepara el estado para el modelo
     x = torch.tensor([estado], dtype=torch.float32).to(device)  # [1, seq_len, features]
     with torch.no_grad():
-        logits = model(x)  # [1, seq_len, num_classes]
-        probs = torch.softmax(logits, dim=-1)
-        action = probs[0, -1].argmax().item()  # O ajusta según tu output
-    
-    print(f"Estado actual: {estado}")
-    print(f"Probabilidades de acciones: {probs[0, -1].tolist()}")
+        logits = model(x)  # [1, num_classes]
+        probs = torch.softmax(logits, dim=-1)  # [1, num_classes]
+        probs_np = probs.cpu().numpy().flatten()
+        # Enmascara las clases no válidas
+        probs_np[len(rects):] = -float('inf')
+        action_idx = int(np.argmax(probs_np))
+
+    acciones_modelo.append(action_idx)  
+    logits_modelo.append(logits.cpu().numpy().flatten()) 
+
+
+    # print(f"[Recursivo] Estado actual: {estado}")
+    # print(f"Probabilidades de acciones: {probs.cpu().numpy().round(3).tolist()}")
+    # print(f"Rectángulos disponibles: {rects}")
+    # print(f"Índice elegido: {action_idx}")
 
     # Busca el rectángulo correspondiente a la acción
-    if action >= len(rects):
+    if action_idx >= len(rects):
+        # print(f"Acción inválida: {action_idx} (rects disponibles: {len(rects)})")
         return  # Acción inválida
-    rect = rects[action]
-    print(f"Intentando colocar rectángulo {rect} (acción {action})")
+    rect = rects[action_idx-1 ]  # -1 porque el índice comienza en 1
+    # print(f"[Recursivo] Rectángulo elegido: {rect}")
 
     fits, rotation = rect_fits_in_space(rect, space)
     if fits:
-
         # Rotar el rectángulo si es necesario
         if rotation == 1:
             rect = (rect[1], rect[0])
@@ -133,7 +143,7 @@ def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, 
 
             # Y_rect.append(rect)
             # Eliminar rectángulo usado
-            rects.pop(action)
+            rects.pop(action_idx-1)
 
 
             # Mostrar cuál espacio es más grande: S3 o S4
@@ -147,7 +157,7 @@ def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, 
                 estado = codificar_estado(temp_spaces, rects, S3, largo_max)
                 estados.append(estado)
 
-                recursive_packing_con_modelo(S3, spaces, rects, placed, estados, Y_rect, largo_max, model)
+                recursive_packing_con_modelo(S3, spaces, rects, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
                 temp_spaces.remove(S3)
 
                 if not rects:
@@ -157,13 +167,13 @@ def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, 
                 estado = codificar_estado(temp_spaces, rects, S4, largo_max)
                 estados.append(estado)
 
-                recursive_packing_con_modelo(S4, spaces, rects, placed, estados, Y_rect, largo_max, model)
+                recursive_packing_con_modelo(S4, spaces, rects, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
                 temp_spaces.remove(S4)
             else:
                 estado = codificar_estado(temp_spaces, rects, S4, largo_max)
                 estados.append(estado)
 
-                recursive_packing_con_modelo(S4, spaces, rects, placed, estados, Y_rect, largo_max, model)
+                recursive_packing_con_modelo(S4, spaces, rects, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
                 temp_spaces.remove(S4)
 
                 if not rects:
@@ -173,7 +183,7 @@ def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, 
                 estado = codificar_estado(temp_spaces, rects, S3, largo_max)
                 estados.append(estado)
 
-                recursive_packing_con_modelo(S3, spaces, rects, placed, estados, Y_rect, largo_max, model)
+                recursive_packing_con_modelo(S3, spaces, rects, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
                 temp_spaces.remove(S3)
             return  # Termina esta rama recursiva
 
@@ -185,6 +195,8 @@ def hr_packing_con_modelo(spaces, rects, model, device="cpu"):
     rects1 = rects.copy()
     estados = []
     Y_rect = []
+    acciones_modelo = []
+    logits_modelo = []  
     largo_max = len(rects) + 1  # Largo máximo del estado
     estado = codificar_estado(spaces, rects1, spaces[0],largo_max )
 
@@ -192,32 +204,33 @@ def hr_packing_con_modelo(spaces, rects, model, device="cpu"):
 
     while rects1:
         colocado = False
-
         # Prepara el estado para el modelo
         x = torch.tensor([estado], dtype=torch.float32).to(device)  # [1, seq_len, features]
         with torch.no_grad():
-            logits = model(x)  # [1, seq_len, num_classes]
-            probs = torch.softmax(logits, dim=-1)
-            # Selecciona la acción con mayor probabilidad
-            action = probs[0, -1].argmax().item()  # O ajusta según tu output
+            logits = model(x)  # [1, num_classes]
+            probs = torch.softmax(logits, dim=-1)  # [1, num_classes]
+            probs_np = probs.cpu().numpy().flatten()
+            # Enmascara las clases no válidas
+            probs_np[len(rects1):] = -float('inf')
+            action_idx = int(np.argmax(probs_np))
+        
+        acciones_modelo.append(action_idx)  
+        logits_modelo.append(logits.cpu().numpy().flatten()) 
+        # print(f"[Iteración] Estado actual: {estado}")
+        # print(f"Probabilidades: {probs.cpu().numpy().round(3).tolist()}")
+        # print(f"Rectángulos disponibles: {rects1}")
+        # print(f"Índice elegido: {action_idx}")
 
-        print(f"Estado actual: {estado}")
-        print(f"Probabilidades de acciones: {probs[0, -1].tolist()}")
-        # Busca el rectángulo correspondiente a la acción
-        # (Aquí debes mapear el índice de acción al rectángulo pendiente)
-        # Por ejemplo, si tus acciones son índices de rectángulos pendientes:
-
-        if action >= len(rects1):
-            break  # Acción inválida
-        rect = rects1[action]
-
-        print(f"Intentando colocar rectángulo {rect} (acción {action})")
-
+        if action_idx >= len(rects1):
+            # print(f"Acción inválida: {action_idx} (rects disponibles: {len(rects1)})")
+            break
+        rect = rects1[action_idx-1]
+        # print(f"Rectángulo elegido: {rect}")
         # Busca un espacio donde quepa
         for space in spaces:
 
             fits, rotation = hr.rect_fits_in_space(rect, space)
-            print(f"Probando espacio {space} para rectángulo {rect}: {'Encaja' if fits else 'No encaja'} (rotación: {rotation})")
+            # print(f"Probando espacio {space} para rectángulo {rect}: {'Encaja' if fits else 'No encaja'} (rotación: {rotation})")
             if fits:
 
                 if rotation == 1:
@@ -240,7 +253,7 @@ def hr_packing_con_modelo(spaces, rects, model, device="cpu"):
 
                     # print(f"Dividiendo espacio {space} en S1={S1} (encima) y S2={S2} (derecha)\n")
                     # Eliminar rectángulo insertado y espacio usado
-                    rects1.pop(action)
+                    rects1.pop(action_idx-1)
                     spaces.remove(space)
 
                     if rects1:  # Solo codificar el estado si quedan rectángulos
@@ -250,7 +263,7 @@ def hr_packing_con_modelo(spaces, rects, model, device="cpu"):
                     # Agregar S1 al espacio disponible para seguir iterando
                     spaces.append(S1)
                     # Llamar recursivamente a RecursivePacking con S2 (bounded)
-                    recursive_packing_con_modelo(S2, spaces, rects1, placed, estados, Y_rect, largo_max, model)
+                    recursive_packing_con_modelo(S2, spaces, rects1, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
 
                     if rects1:
                         Y_rect.append(hr.codificar_y_estado(estados[-1], rect))
@@ -263,7 +276,7 @@ def hr_packing_con_modelo(spaces, rects, model, device="cpu"):
                     break
         if not colocado:
             break
-    return placed, estados, Y_rect
+    return placed, estados, Y_rect, acciones_modelo, logits_modelo
 
 
 def ordenar_por_area(rects):

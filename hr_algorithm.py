@@ -246,6 +246,9 @@ def heuristic_recursion(rects, container_width):
     all_states = []
     all_Y_rect = []
 
+    best_placement_states = []
+    best_placement_Y_states = []
+
     for i in range(len(rects) - 1):
         for j in range(i + 1, len(rects)):
             temp_rects = rects.copy()
@@ -263,16 +266,17 @@ def heuristic_recursion(rects, container_width):
                 rect_sequence = temp_rects.copy()
                 best_height = altura
                 best_placements = placements
+                all_states.append(estados)
+                all_Y_rect.append(Y_rect)
+                best_placement_states = estados
+                best_placement_Y_states = Y_rect
 
-
-            all_states.append(estados)
-            all_Y_rect.append(Y_rect)
     
 
-    return best_placements, best_height, rect_sequence, all_states, all_Y_rect
+    return best_placements, best_height, rect_sequence, all_states, all_Y_rect, best_placement_states, best_placement_Y_states
 # ----------------------------
 # Funciones de visualización
-def visualizar_packing(placements, container_width, container_height=None):
+def visualizar_packing(placements, container_width, container_height=None, show=True):
     fig, ax = plt.subplots()
     colors = {}
 
@@ -306,4 +310,6 @@ def visualizar_packing(placements, container_width, container_height=None):
 
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
+    return fig
