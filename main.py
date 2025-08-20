@@ -31,10 +31,10 @@ CATEGORIES = {
 categoria = "C1"  # Cambia aquí la categoría
 cantidad = 1    # Cambia aquí la cantidad de problemas a generar
 exportar = True  # Cambia a True si quieres guardar los archivos
-problemas, ancho, alto = gen.generate_problems_guillotine(categoria, cantidad, export=exportar)
+# problemas, ancho, alto = gen.generate_problems_guillotine(categoria, cantidad, export=exportar)
 
-# problemas = gen.generate_problems_from_file("/tests/c1p1.txt")
-# ancho, alto = CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"]
+problemas = gen.generate_problems_from_file("tests/c1p1.txt")
+ancho, alto = CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"]
 # print(f"Problemas generados para la categoría {categoria}: {problemas[0]}")
 
 
@@ -57,8 +57,16 @@ for idx, rects in enumerate(problemas):
     hr.visualizar_packing(placements, container_width=ancho, container_height=alto, show=True)
 
 
-print(all_states_total)
-print(all_Y_rect_total)
+# Imprimir solo los "R_in" de cada estado en all_states_total
+for state in all_states_total:
+    print(f"largo: {len(state)}")
+    for x in state:
+        print(f"R_select_mask: {x.get('R_select_mask', [])}")
+
+for fila in all_Y_rect_total:
+    print(f"largo: {len(fila)}")
+    for y in fila:
+        print(f"y: {y}")
 
 # Mostrar estados y los índices de los rectángulos elegidos si están disponibles
 # if all_states_total is not None:

@@ -36,10 +36,17 @@ def _rect_features_sin_seqid(rect: Rect, S: Space, W: int, Href: int) -> List[fl
 
     # <- sin seq_id
     return [
-        h_n, w_n, area_n,
-        ratio, max_side, min_side,
-        float(fits), float(fits_rot),
-        slack_w, slack_h, waste
+        h_n, 
+        w_n, 
+        area_n,
+        ratio, 
+        max_side, 
+        min_side,
+        float(fits), 
+        float(fits_rot),
+        slack_w, 
+        slack_h, 
+        waste
     ]
 
 def _space_features_sin_seqid(s: Space, W: int, Href: int, include_xy: bool = True) -> List[float]:

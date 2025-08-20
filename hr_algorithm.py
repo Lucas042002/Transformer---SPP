@@ -108,7 +108,24 @@ def codificar_y_estado(estado, rect):
     # Si no se encontró coincidencia, devolver -1
     return -1
 
-def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, category=None):
+def codificar_y_rect_con_lista(rects_pendientes, rect):
+    """
+    rects_pendientes: lista [(w,h), ...] en el orden en que armaste R_in[0]
+    rect: (w,h) elegido por HR
+    Devuelve one-hot de largo N.
+    """
+    N = len(rects_pendientes)
+    Y = [0] * N
+
+    for idx, r in enumerate(rects_pendientes):
+        if r == rect or r == (rect[1], rect[0]):
+            Y[idx] = 1
+            break
+
+    return Y
+
+
+def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, category=""):
     while rects:
         for i, rect in enumerate(rects):
             # Verificar si el rectángulo cabe en el espacio
@@ -123,7 +140,7 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, c
                 # print(f"[Recursivo] Probando rectángulo {rect} en espacio {space} -> posición {pos}")
                 if ok:
                     placed.append((rect, pos))
-                    Y_rect.append(codificar_y_estado(estados[-1], rect))
+                    Y_rect.append(codificar_y_rect_con_lista(rects, rect))
 
                     # print(f"[Recursivo] Rectángulo {rect} colocado en ({space[2]},{space[3]})")
                     # Dividir en nuevos S3 y S4 desde el subespacio actual
@@ -149,39 +166,39 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, c
                         estado = tst.codificar_estado(temp_spaces, rects, S3, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
                         estados.append(estado)
 
-                        recursive_packing(S3, spaces, rects, placed, estados, Y_rect)
+                        recursive_packing(S3, spaces, rects, placed, estados, Y_rect, category)
                         temp_spaces.remove(S3)
 
                         if not rects:
                             return # Termina esta rama recursiva
 
-                        Y_rect.append(codificar_y_estado(estados[-1], rect))
+                        Y_rect.append(codificar_y_rect_con_lista(rects, rect))
                         estado = tst.codificar_estado(temp_spaces, rects, S4, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
                         estados.append(estado)
 
-                        recursive_packing(S4, spaces, rects, placed, estados, Y_rect)
+                        recursive_packing(S4, spaces, rects, placed, estados, Y_rect, category)
                         temp_spaces.remove(S4)
                     else:
                         estado = tst.codificar_estado(temp_spaces, rects, S4, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
                         estados.append(estado)
 
-                        recursive_packing(S4, spaces, rects, placed, estados, Y_rect)
+                        recursive_packing(S4, spaces, rects, placed, estados, Y_rect, category)
                         temp_spaces.remove(S4)
                         
                         if not rects:
                             return  # Termina esta rama recursiva
 
-                        Y_rect.append(codificar_y_estado(estados[-1], rect))
+                        Y_rect.append(codificar_y_rect_con_lista(rects, rect))
                         estado = tst.codificar_estado(temp_spaces, rects, S3, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
                         estados.append(estado)
 
-                        recursive_packing(S3, spaces, rects, placed, estados, Y_rect)
+                        recursive_packing(S3, spaces, rects, placed, estados, Y_rect, category)
                         temp_spaces.remove(S3)
 
                     return  # Termina esta rama recursiva
         break  # Si ningún rectángulo cabe, se termina
 
-def hr_packing(spaces, rects, category):
+def hr_packing(spaces, rects, category=""):
     placed = []
     rects1 = rects.copy()
 
@@ -205,7 +222,7 @@ def hr_packing(spaces, rects, category):
                         placed.append((rect, pos))
                         # print(f"Rectángulo {rect} colocado en ({space[2]},{space[3]})")
 
-                        Y_rect.append(codificar_y_estado(estado, rect))
+                        Y_rect.append(codificar_y_rect_con_lista(rects1, rect))
 
 
                         # Dividir el espacio en S1 (encima, unbounded) y S2 (derecha, bounded)
@@ -229,7 +246,7 @@ def hr_packing(spaces, rects, category):
 
                         recursive_packing(S2, spaces, rects1, placed, estados, Y_rect, category)
                         if rects1:
-                            Y_rect.append(codificar_y_estado(estados[-1], rect))
+                            Y_rect.append(codificar_y_rect_con_lista(rects1, rect))
 
                         placed_flag = True
 
@@ -241,7 +258,7 @@ def hr_packing(spaces, rects, category):
                 break
         if not placed_flag:
             break
-    Y_rect.append(codificar_y_estado(estado, rect))         
+    Y_rect.append(codificar_y_rect_con_lista(rects1, rect))
     return placed, estados, Y_rect
 
 # ----------------------------
