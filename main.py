@@ -61,7 +61,7 @@ for idx, rects in enumerate(problemas):
 for state in all_states_total:
     print(f"largo: {len(state)}")
     for x in state:
-        print(f"R_select_mask: {x.get('R_select_mask', [])}")
+        print(f"State: {x}")
 
 for fila in all_Y_rect_total:
     print(f"largo: {len(fila)}")
