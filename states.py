@@ -78,7 +78,7 @@ def _space_features_sin_seqid(s: Space, W: int, Href: int, include_xy: bool = Tr
             0, # type_id
         ]
     else:
-        return [h_n, w_n, area_n]
+        return (h_n, w_n, area_n)
 
 def codificar_estado(
     spaces: List[Space],

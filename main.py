@@ -1,5 +1,5 @@
 import hr_algorithm as hr
-import transformer as tr
+import transformer_encoder_decoder as tr
 import hr_transformer as hr_tr
 import hr_random as hr_rand
 import generator as gen
@@ -31,14 +31,17 @@ CATEGORIES = {
 # ----------------------------
 # Elegir categoría y cantidad de problemas
 categoria = "C1"  # Cambia aquí la categoría
-cantidad = 1    # Cambia aquí la cantidad de problemas a generar
-exportar = True  # Cambia a True si quieres guardar los archivos
-# problemas, ancho, alto = gen.generate_problems_guillotine(categoria, cantidad, export=exportar)
+cantidad = 30    # Cambia aquí la cantidad de problemas a generar
+exportar = False  # Cambia a True si quieres guardar los archivos
+problemas, ancho, alto = gen.generate_problems_guillotine(categoria, cantidad, export=exportar)
+max_len = CATEGORIES[categoria]["num_items"] + 1  # +1 para seq_id
 
-problemas = gen.generate_problems_from_file("tests/c1p1.txt")
-ancho, alto = CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"]
+
+# problemas = gen.generate_problems_from_file("tests/c1p1.txt")
+# ancho, alto = CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"]
+# max_len = CATEGORIES[categoria]["num_items"]  # +1 para seq_id
+
 # print(f"Problemas generados para la categoría {categoria}: {problemas[0]}")
-
 
 
 
@@ -54,274 +57,71 @@ all_Y_rect_total = []
 for idx, rects in enumerate(problemas):
     # print(f"\nResolviendo problema {idx+1} de la categoría {categoria} ({len(rects)} rectángulos, contenedor {ancho}x{alto})")
     placements, altura, rect_sequence, all_states, all_Y_rect, best_placement_states, best_placement_Y_states = hr.heuristic_recursion(rects, ancho, category=categoria)
-    
+
     aux = []
-    if idx == 3:
-        for x in all_states:
-            states_con_seq = st.agregar_seq_id_estados(x)
-            aux.extend(states_con_seq)
-        pprint.pprint(aux)
-        print(f"largo: {len(aux)}")
+    for state in all_states:
+        aux = st.agregar_seq_id_estados(state)
+        all_states_total.append(aux)
 
-
-    all_states_total.extend(aux)
     all_Y_rect_total.extend(all_Y_rect)
     # print(f"Altura final: {altura}")
     # print(f"Mejor altura final: {altura}")
-    hr.visualizar_packing(placements, container_width=ancho, container_height=alto, show=True)
+    # hr.visualizar_packing(placements, container_width=ancho, container_height=alto, show=True)
 
-# if not all_states_total:
-#     print("all_states_total está vacío")
-# else:
-#     pprint.pprint(all_states_total[-1])
-
-# for state in all_states_total:
-#     print(f"largo: {len(state)}")
-#     for x in state:
-#         print(f"State: {x}")
-
-# for fila in all_Y_rect_total:
-#     print(f"largo: {len(fila)}")
-#     print(f"Fila: {fila}")
+all_states_total_new = []
+for instance in all_states_total:
+    for state in instance:
+        new_state = []
+        for space in state[0]:
+            new_state.append(space)
+        for rect in state[1]:
+            new_state.append(rect)
+        if len(new_state) < max_len:
+            new_state += [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, state[0][0][12]]] * (max_len - len(new_state))
+        all_states_total_new.append(new_state)
 
 
-# Mostrar estados y los índices de los rectángulos elegidos si están disponibles
-# if all_states_total is not None:
-#     print(f"\nCantidad de secuencias de estados generadas: {len(all_states_total), len(all_Y_rect_total)}")
-
-# largo_max = CATEGORIES[categoria]["num_items"] + 1
-
-# train_loader, val_loader, input_seq_length, output_seq_length = tr.procesar_datos_entrada(
-#     largo_max, all_states_total, all_Y_rect_total, verbose=True)
-
-# Modelo
-# input_dim = 5
-# num_layers = 8 
-# num_heads = 4
-# head_dim = 8
-# num_classes = largo_max  # O el número real de posibles acciones por paso
-# learning_rate = 1e-4  # o incluso 1e-5
-
-# model = tr.CustomModel(input_dim=input_dim, num_heads=num_heads, head_dim=head_dim, num_layers=num_layers, num_classes=num_classes)
-# optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-# Y = []
-# for estados, acciones in zip(all_states_total, all_Y_rect_total):
-#     for state, action in zip(estados, acciones):
-#         if isinstance(action, list) or isinstance(action, np.ndarray):
-#             if np.sum(action) == 0:
-#                 Y.append(0)
-#             else:
-#                 Y.append(int(np.argmax(action)))
-#         else:
-#             Y.append(int(action))
-# Y = np.array(Y)
-
-# # Calcula los pesos inversos a la frecuencia
-# num_classes = largo_max
-# counts = np.bincount(Y, minlength=num_classes)
-# weights = 1.0 / (counts + 1e-6)
-# weights = weights / weights.sum() * num_classes  # Normaliza para que sumen num_classes
-# weights = torch.tensor(weights, dtype=torch.float32)
-
-# # print("Pesos para CrossEntropyLoss:", weights)
-
-# criterion = nn.CrossEntropyLoss(weight=weights)
+all_Y_rect_total_new = []
+for instance in all_Y_rect_total:
+    for desicion in instance:
+        all_Y_rect_total_new.append(desicion)
 
 
+X_tensor = torch.tensor(all_states_total_new, dtype=torch.float32)
+Y_tensor = torch.tensor(all_Y_rect_total_new, dtype=torch.long)
 
+# Después de crear X_tensor y Y_tensor
+print("Shape x:", X_tensor.shape)  # (148, 17, 13)
+print("Shape y:", Y_tensor.shape)  # (148,)
 
-# # tr.entrenamiento(model, train_loader, val_loader, optimizer, criterion, epochs=50, categoria=categoria)
+# Usar la función adaptada
+train_loader, val_loader, input_seq_length, output_seq_length = tr.procesar_datos_entrada_encoder_decoder_adapted(
+    X_tensor, Y_tensor, verbose=True
+)
 
-# # Cargar el modelo entrenado
+# Crear el modelo
+input_dim = 13  # Dimensión de los vectores de estado
+num_classes = 18  # 17 rectángulos + 1 token especial (start/end)
 
+model = tr.SPPTransformerEncoderDecoder(
+    input_dim=input_dim,
+    d_model=512,
+    num_heads=8,
+    num_encoder_layers=3,
+    num_decoder_layers=3,
+    d_ff=512,
+    max_seq_length=input_seq_length,  # 17
+    num_classes=num_classes,  # 18
+    dropout=0.1
+)
 
-# model_path = f"SPP_transformer_{categoria}.pth"  # Cambia por tu ruta real
-# model.load_state_dict(torch.load(model_path, map_location="cpu"))  # Usa "cuda" si tienes GPU
-# model.eval()
+# Entrenar el modelo
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignora padding
 
+train_losses, val_accuracies = tr.entrenamiento_encoder_decoder(
+    model, train_loader, val_loader, optimizer, criterion, 
+    epochs=50, categoria=categoria
+)
 
-
-
-def limpiar_datos(all_states, all_Y_rect, largo_max):
-    # Si solo tienes una instancia (una lista de estados y una de acciones)
-    estados = all_states
-    acciones = all_Y_rect
-
-    for j, state in enumerate(estados):
-        if len(state) < largo_max:
-            # Rellenar con [0,0,0,0,0] hasta alcanzar largo_max
-            state += [[0, 0, 0, 0, 0]] * (largo_max - len(state))
-
-
-    # Filtrar estados y acciones donde la acción es solo ceros
-    X = []
-    Y = []
-    for estado, accion in zip(estados, acciones):
-        if not (isinstance(accion, list) and all(a == 0 for a in accion)):
-            X.append(estado)
-            # Convierte one-hot a índice (o 0 si todo es cero)
-            if isinstance(accion, list) or isinstance(accion, np.ndarray):
-                if np.sum(accion) == 0:
-                    Y.append(0)
-                else:
-                    Y.append(int(np.argmax(accion)))
-            else:
-                Y.append(int(accion))
-
-    X = np.array(X)
-    Y = np.array(Y)
-    return X, Y
-
-def evaluar_modelo_vs_hr(problemas, ancho, alto, model, device="cpu"):
-    total_pasos = 0
-    pasos_correctos = 0
-    cross_entropy_total = 0
-    total_secuencias = 0
-    secuencias_exactas = 0
-    alturas_hr = []
-    alturas_modelo = []
-    diferencias_altura = []
-
-    alturas_random = []
-    diferencias_altura_random = []
-
-    for idx, rects in enumerate(problemas):
-        # Ejecuta HR
-        placements_hr, altura_hr, secuencia_hr, estados_hr, Y_rect_hr, best_placement_states, best_placement_Y_states = hr.heuristic_recursion(rects, ancho)
-        alturas_hr.append(altura_hr)
-
-        # Ejecuta modelo
-        placements_modelo, estados_modelo, Y_rect_modelo, acciones_modelo, logits_modelo = hr_tr.hr_packing_con_modelo(
-            spaces=[(0, 0, ancho, 1000)],
-            rects=rects.copy(),
-            model=model,
-            device=device
-        )
-        altura_modelo = hr_tr.calcular_altura(placements_modelo)
-        alturas_modelo.append(altura_modelo)
-        diferencias_altura.append(altura_modelo - altura_hr)
-
-
-        # Ejecuta HR_random
-        placements_random, estados_random, Y_rect_random = hr_rand.hr_packing_random(
-            spaces=[(0, 0, ancho, 1000)],
-            rects=rects.copy() 
-        )
-        altura_random = hr_tr.calcular_altura(placements_random)
-        alturas_random.append(altura_random)
-        diferencias_altura_random.append(altura_random - altura_modelo)
-
-
-        # print(f" best_placement_Y_states: {(best_placement_Y_states)}")
-        # print(f" Y_rect_modelo: {(Y_rect_modelo)}")
-
-        # Precisión de decisión y cross entropy
-        best_placement_states, best_placement_Y_states = limpiar_datos(
-             best_placement_states, best_placement_Y_states, largo_max=CATEGORIES[categoria]["num_items"] + 1
-        )
-        # print(f" best_placement_Y_states: {(best_placement_Y_states)}")
-        # print(f" acciones_modelo: {(acciones_modelo)}")
-
-
-
-        pasos = min(len(best_placement_Y_states), len(acciones_modelo))
-        correctos = 0
-        ce = 0
-        for t in range(pasos):
-            # best_placement_Y_states[t] es one-hot o índice, acciones_modelo[t] es índice
-            y_val = best_placement_Y_states[t]
-            # Si es lista de listas, toma la primera sublista no vacía
-            if isinstance(y_val, (list, np.ndarray)):
-                # Si es lista de listas (ej: [[0,1,0,0], [0,0,0,0], ...])
-                if len(y_val) > 0 and isinstance(y_val[0], (list, np.ndarray)):
-                    # Busca la primera sublista que no sea todo ceros
-                    for sub in y_val:
-                        if np.sum(sub) > 0:
-                            y_true = int(np.argmax(sub))
-                            break
-                    else:
-                        y_true = 0  # Si todas son ceros, padding
-                else:
-                    # Es un one-hot plano
-                    y_true = int(np.argmax(y_val))
-            else:
-                y_true = int(y_val)
-            
-            
-            y_pred = int(acciones_modelo[t])
-            if y_true == y_pred:
-                correctos += 1
-
-            # Cross entropy (usando logits si los guardas, si no, puedes omitir)
-            # logits_modelo[t] = ... # Si guardas los logits en hr_packing_con_modelo
-            ce += F.cross_entropy(torch.tensor([logits_modelo[t]]), torch.tensor([y_true]), reduction='sum').item()
-
-        total_pasos += pasos
-        pasos_correctos += correctos
-        cross_entropy_total += ce
-
-        total_secuencias += 1
-        if correctos == pasos:
-            secuencias_exactas += 1
-
-        print(f"Problema {idx+1}: Altura HR={altura_hr}, Altura Modelo={altura_modelo}, Precisión de decisión={correctos/pasos:.3f}")
-
-
-        # Guardar la mejor y peor imagen del modelo
-        # Mejor: menor altura_modelo - altura_hr (más cercano a 0 o negativo)
-        # Peor: mayor diferencia positiva (modelo peor que HR)
-        if idx == 0:
-            mejor_idx = idx
-            peor_idx = idx
-            mejor_diff = altura_modelo - altura_hr
-            peor_diff = altura_modelo - altura_hr
-            mejor_placements = placements_modelo
-            peor_placements = placements_modelo
-        else:
-            diff = altura_modelo - altura_hr
-            if diff < mejor_diff:
-                mejor_diff = diff
-                mejor_idx = idx
-                mejor_placements = placements_modelo
-            if diff > peor_diff:
-                peor_diff = diff
-                peor_idx = idx
-                peor_placements = placements_modelo
-
-    # Guardar imágenes después del bucle
-    import matplotlib.pyplot as plt
-
-    def guardar_packing(placements, ancho, alto, filename):
-        fig = hr.visualizar_packing(placements, ancho, alto, show=False)
-        plt.savefig(filename)
-        plt.close(fig)
-
-    mejor_filename = f"mejor_modelo_{categoria}.png"
-    peor_filename = f"peor_modelo_{categoria}.png"
-    guardar_packing(mejor_placements, CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"], mejor_filename)
-    guardar_packing(peor_placements, CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"], peor_filename)
-
-    print("\n--- MÉTRICAS GLOBALES ---")
-    print(f"Precisión de decisión global: {pasos_correctos/total_pasos:.4f}")
-    print(f"Cross Entropy promedio: {cross_entropy_total/total_pasos:.4f}")
-    print(f"Altura promedio HR: {np.mean(alturas_hr):.2f}")
-    print(f"Altura promedio Modelo: {np.mean(alturas_modelo):.2f}")
-    std_dif = np.std(diferencias_altura)
-    print(f"Diferencia promedio de altura: {np.mean(diferencias_altura):.2f} ± {std_dif:.2f}")
-    print(f"Altura promedio Random: {np.mean(alturas_random):.2f}")
-    std_dif_random = np.std(diferencias_altura_random)
-    print(f"Diferencia promedio de altura (Random): {np.mean(diferencias_altura_random):.2f} ± {std_dif_random:.2f}")
-    print(f"Exactitud de secuencia: {secuencias_exactas}/{total_secuencias} ({secuencias_exactas/total_secuencias:.2%})")
-
-
-
-
-# --- Llama a la función de evaluación ---
-# evaluar_modelo_vs_hr(
-#     problemas=problemas,
-#     ancho=ancho,
-#     alto=alto,
-#     model=model,
-#     device="cpu"
-# )
+print("Entrenamiento completado!")

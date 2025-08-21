@@ -241,74 +241,63 @@ class SPPTransformerEncoderDecoder(nn.Module):
             return torch.empty((batch_size, 0), dtype=torch.long, device=device)
 
 
-def procesar_datos_entrada_encoder_decoder(largo_max, all_states, all_Y_rect, verbose=False):
+def procesar_datos_entrada_encoder_decoder_adapted(X_tensor, Y_tensor, verbose=False):
     """
-    Procesa los datos para el modelo encoder-decoder
+    Adapta datos ya procesados (X_tensor, Y_tensor) para el modelo encoder-decoder
+    
+    Args:
+        X_tensor: torch.Tensor de shape (N, seq_len, features) - Estados ya procesados
+        Y_tensor: torch.Tensor de shape (N,) - Decisiones individuales
+        
+    Returns:
+        train_loader, val_loader, input_seq_length, output_seq_length
     """
-    # Procesar estados (input del encoder)
-    for i, all_state in enumerate(all_states):
-        for j, state in enumerate(all_state):
-            if len(state) < largo_max:
-                state += [[0, 0, 0, 0, 0]] * (largo_max - len(state))
-
-    # Preparar secuencias de entrada (encoder) y objetivo (decoder)
-    X_encoder = []  # Estados para el encoder
-    Y_decoder = []  # Secuencias de decisiones para el decoder
     
-    for estados, acciones in zip(all_states, all_Y_rect):
-        if len(estados) > 0 and len(acciones) > 0:
-            # Input del encoder: todos los estados
-            X_encoder.append(estados)
-            
-            # Target del decoder: secuencia de acciones con tokens especiales
-            secuencia_acciones = []
-            for accion in acciones:
-                if isinstance(accion, list) or isinstance(accion, np.ndarray):
-                    if np.sum(accion) == 0:
-                        secuencia_acciones.append(0)  # padding
-                    else:
-                        secuencia_acciones.append(int(np.argmax(accion)))
-                else:
-                    secuencia_acciones.append(int(accion))
-            
-            # Agregar token de inicio al principio
-            secuencia_con_start = [9] + secuencia_acciones  # 9 es el start token
-            Y_decoder.append(secuencia_con_start)
+    # Tus datos ya están en el formato correcto para el encoder
+    # X_tensor: (148, 17, 13) -> (batch, seq_len, features)
+    X_encoder = X_tensor.float()
     
-    # Padding para secuencias del decoder
-    max_decoder_len = max(len(seq) for seq in Y_decoder) if Y_decoder else 1
-    for seq in Y_decoder:
-        while len(seq) < max_decoder_len:
-            seq.append(0)  # padding token
+    # Para el decoder, necesitamos crear secuencias de decisiones
+    # Como Y_tensor son decisiones individuales, vamos a agruparlas en secuencias
     
-    X_encoder = np.array(X_encoder, dtype=np.float32)
+    # Opción 1: Usar cada decisión individual como una secuencia de longitud 1
+    # con start token + decision + end token
+    Y_decoder = []
+    start_token = 9  # Token de inicio
+    end_token = 8    # Token de fin (puedes usar otro número)
+    
+    for y in Y_tensor:
+        # Crear secuencia: [start_token, decision, end_token]
+        sequence = [start_token, int(y.item())]
+        Y_decoder.append(sequence)
+    
+    # Convertir a array
     Y_decoder = np.array(Y_decoder, dtype=np.int64)
     
-    # Normalización de X_encoder
-    for i in range(X_encoder.shape[-1]):
-        max_val = np.abs(X_encoder[..., i]).max()
-        if max_val > 0:
-            X_encoder[..., i] /= max_val
+    # Ya todas las secuencias tienen la misma longitud (2), no necesita padding
+    max_decoder_len = Y_decoder.shape[1]
     
     if verbose:
         print(f"X_encoder shape: {X_encoder.shape}")
         print(f"Y_decoder shape: {Y_decoder.shape}")
         print(f"Primeras 3 secuencias Y_decoder: {Y_decoder[:3]}")
+        print(f"Primeras 3 decisiones originales: {Y_tensor[:3]}")
     
-    # Convertir a tensores
-    X_tensor = torch.tensor(X_encoder, dtype=torch.float32)
-    Y_tensor = torch.tensor(Y_decoder, dtype=torch.long)
+    # Convertir Y_decoder a tensor
+    Y_tensor_decoder = torch.tensor(Y_decoder, dtype=torch.long)
     
     # División entrenamiento/validación
-    X_train, X_val, Y_train, Y_val = train_test_split(X_tensor, Y_tensor, test_size=0.2, random_state=42)
+    X_train, X_val, Y_train, Y_val = train_test_split(
+        X_encoder, Y_tensor_decoder, test_size=0.3, random_state=42
+    )
     
-    batch_size = 16  # Menor batch size para encoder-decoder
+    batch_size = 16
     train_dataset = TensorDataset(X_train, Y_train)
     val_dataset = TensorDataset(X_val, Y_val)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
     
-    return train_loader, val_loader, X_tensor.shape[1], max_decoder_len
+    return train_loader, val_loader, X_encoder.shape[1], max_decoder_len
 
 
 def entrenamiento_encoder_decoder(model, train_loader, val_loader, optimizer, criterion, epochs=50, categoria=None):

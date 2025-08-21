@@ -119,14 +119,14 @@ def generate_problems_guillotine(category, n_problems=3, export=False):
                 min_size=2
             )
             
-            print(f"Rectángulos generados: {len(rects_with_pos)}")
-            print(f"Área total: {sum(w*h for x,y,w,h in rects_with_pos)} / {cat['width']*cat['height']}")
+            # print(f"Rectángulos generados: {len(rects_with_pos)}")
+            # print(f"Área total: {sum(w*h for x,y,w,h in rects_with_pos)} / {cat['width']*cat['height']}")
             
             # Mostrar algunos ejemplos con sus aspect ratios
             for idx, (x, y, w, h) in enumerate(rects_with_pos[:10]):
                 aspect = max(w/h, h/w)
-                print(f"  Rect {idx+1}: pos=({x},{y}) size=({w},{h}) área={w*h} aspect={aspect:.2f}")
-            print("")
+            #     print(f"  Rect {idx+1}: pos=({x},{y}) size=({w},{h}) área={w*h} aspect={aspect:.2f}")
+            # print("")
 
             # Filtros más permisivos para rectángulos extremos
             valid_rects = []
@@ -136,11 +136,11 @@ def generate_problems_guillotine(category, n_problems=3, export=False):
                 if 1 <= min(w, h) and aspect <= 7:  # Más permisivo
                     valid_rects.append((w, h))
             
-            print(f"Rectángulos válidos después del filtro: {len(valid_rects)}")
+            # print(f"Rectángulos válidos después del filtro: {len(valid_rects)}")
             
             # Mostrar distribución de aspect ratios
             aspects = [max(w/h, h/w) for w, h in valid_rects]
-            print(f"Aspect ratios - Min: {min(aspects):.2f}, Max: {max(aspects):.2f}, Promedio: {np.mean(aspects):.2f}")
+            # print(f"Aspect ratios - Min: {min(aspects):.2f}, Max: {max(aspects):.2f}, Promedio: {np.mean(aspects):.2f}")
             
             if len(valid_rects) >= cat["num_items"]:
                 # Contar frecuencias de cada rectángulo único
@@ -153,8 +153,8 @@ def generate_problems_guillotine(category, n_problems=3, export=False):
                     # Agregar máximo 2 de cada tipo
                     available_rects.extend([rect] * min(count, 2))
                 
-                print(f"Rectángulos únicos: {len(rect_counter)}")
-                print(f"Rectángulos disponibles (máx 2 por tipo): {len(available_rects)}")
+                # print(f"Rectángulos únicos: {len(rect_counter)}")
+                # print(f"Rectángulos disponibles (máx 2 por tipo): {len(available_rects)}")
                 
                 # Verificar si tenemos suficientes rectángulos únicos
                 if len(available_rects) >= cat["num_items"]:
@@ -188,7 +188,7 @@ def generate_problems_guillotine(category, n_problems=3, export=False):
                     # Verificar distribución final
                     final_counter = Counter(final_rects)
                     max_repetitions = max(final_counter.values())
-                    print(f"Máximo de repeticiones en resultado final: {max_repetitions}")
+                    # print(f"Máximo de repeticiones en resultado final: {max_repetitions}")
                     
                     if max_repetitions <= 3:
                         problems.append(final_rects)
@@ -196,9 +196,9 @@ def generate_problems_guillotine(category, n_problems=3, export=False):
                         # Mostrar estadísticas de los rectángulos seleccionados
                         final_aspects = [max(w/h, h/w) for w, h in final_rects]
                         final_sizes = [min(w, h) for w, h in final_rects]
-                        print(f"Rectángulos finales - Aspect ratios: Min={min(final_aspects):.2f}, Max={max(final_aspects):.2f}")
-                        print(f"Tamaños mínimos: Min={min(final_sizes)}, Max={max(final_sizes)}")
-                        print(f"Distribución de rectángulos: {dict(final_counter)}")
+                        # print(f"Rectángulos finales - Aspect ratios: Min={min(final_aspects):.2f}, Max={max(final_aspects):.2f}")
+                        # print(f"Tamaños mínimos: Min={min(final_sizes)}, Max={max(final_sizes)}")
+                        # print(f"Distribución de rectángulos: {dict(final_counter)}")
                         
                         if export:
                             fname = f"{category.lower()}_extreme_{i+1}.txt"
@@ -210,16 +210,16 @@ def generate_problems_guillotine(category, n_problems=3, export=False):
                             total_area_generated = sum(w*h for x,y,w,h in rects_with_pos)
                             container_area = cat['width'] * cat['height']
                             
-                            print(f"Exportado: {fname}")
-                            print(f"  Área contenedor: {container_area}")
-                            print(f"  Área generada total: {total_area_generated}")
-                            print(f"  Área seleccionada: {total_area_selected}")
-                            print(f"  Cobertura: {total_area_generated/container_area:.1%}")
+                            # print(f"Exportado: {fname}")
+                            # print(f"  Área contenedor: {container_area}")
+                            # print(f"  Área generada total: {total_area_generated}")
+                            # print(f"  Área seleccionada: {total_area_selected}")
+                            # print(f"  Cobertura: {total_area_generated/container_area:.1%}")
                         break
-                    else:
-                        print(f"Demasiadas repeticiones ({max_repetitions}), reintentando...")
-                else:
-                    print(f"No hay suficientes rectángulos únicos. Disponibles: {len(available_rects)}, Necesarios: {cat['num_items']}")
+                    # else:
+                        # print(f"Demasiadas repeticiones ({max_repetitions}), reintentando...")
+                # else:
+                    # print(f"No hay suficientes rectángulos únicos. Disponibles: {len(available_rects)}, Necesarios: {cat['num_items']}")
 
 
             intentos += 1
