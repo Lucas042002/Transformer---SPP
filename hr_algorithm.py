@@ -115,11 +115,11 @@ def codificar_y_rect_con_lista(rects_pendientes, rect):
     Devuelve one-hot de largo N.
     """
     N = len(rects_pendientes)
-    Y = [0] * N
+    Y = 0
 
     for idx, r in enumerate(rects_pendientes):
         if r == rect or r == (rect[1], rect[0]):
-            Y[idx] = 1
+            Y = idx+1
             break
 
     return Y

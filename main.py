@@ -6,6 +6,8 @@ import generator as gen
 import torch
 import torch.nn as nn
 import numpy as np
+import pprint
+import states as st
 import torch.nn.functional as F
 
 # ----------------------------
@@ -46,27 +48,42 @@ ancho, alto = CATEGORIES[categoria]["width"], CATEGORIES[categoria]["height"]
 
 all_states_total = []
 all_Y_rect_total = []
+
+
 #Ahora puedes pasar cada problema al HR y recolectar los datos
 for idx, rects in enumerate(problemas):
     # print(f"\nResolviendo problema {idx+1} de la categoría {categoria} ({len(rects)} rectángulos, contenedor {ancho}x{alto})")
     placements, altura, rect_sequence, all_states, all_Y_rect, best_placement_states, best_placement_Y_states = hr.heuristic_recursion(rects, ancho, category=categoria)
-    all_states_total.extend(all_states)
+    
+    aux = []
+    if idx == 3:
+        for x in all_states:
+            states_con_seq = st.agregar_seq_id_estados(x)
+            aux.extend(states_con_seq)
+        pprint.pprint(aux)
+        print(f"largo: {len(aux)}")
+
+
+    all_states_total.extend(aux)
     all_Y_rect_total.extend(all_Y_rect)
     # print(f"Altura final: {altura}")
     # print(f"Mejor altura final: {altura}")
     hr.visualizar_packing(placements, container_width=ancho, container_height=alto, show=True)
 
+# if not all_states_total:
+#     print("all_states_total está vacío")
+# else:
+#     pprint.pprint(all_states_total[-1])
 
-# Imprimir solo los "R_in" de cada estado en all_states_total
-for state in all_states_total:
-    print(f"largo: {len(state)}")
-    for x in state:
-        print(f"State: {x}")
+# for state in all_states_total:
+#     print(f"largo: {len(state)}")
+#     for x in state:
+#         print(f"State: {x}")
 
-for fila in all_Y_rect_total:
-    print(f"largo: {len(fila)}")
-    for y in fila:
-        print(f"y: {y}")
+# for fila in all_Y_rect_total:
+#     print(f"largo: {len(fila)}")
+#     print(f"Fila: {fila}")
+
 
 # Mostrar estados y los índices de los rectángulos elegidos si están disponibles
 # if all_states_total is not None:
