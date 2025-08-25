@@ -13,7 +13,7 @@ CATEGORIES = {
     "C7": {"num_items": 197, "width": 160, "height": 240},
 }
 
-def generate_problems_guillotine(category, n_problems=3, export=False):
+def generate_problems_guillotine(category, n_problems=1, export=False):
     """
     Genera problemas usando el método de guillotina con rectángulos más extremos.
     """
@@ -133,7 +133,7 @@ def generate_problems_guillotine(category, n_problems=3, export=False):
             for x, y, w, h in rects_with_pos:
                 aspect = max(w/h, h/w) if min(w, h) > 0 else 1
                 # Permitir aspect ratios hasta 7 y tamaños mínimos de 1
-                if 1 <= min(w, h) and aspect <= 7:  # Más permisivo
+                if 1 <= min(w, h) and aspect <= 20:  # Más permisivo
                     valid_rects.append((w, h))
             
             # print(f"Rectángulos válidos después del filtro: {len(valid_rects)}")
@@ -151,7 +151,7 @@ def generate_problems_guillotine(category, n_problems=3, export=False):
                 available_rects = []
                 for rect, count in rect_counter.items():
                     # Agregar máximo 2 de cada tipo
-                    available_rects.extend([rect] * min(count, 2))
+                    available_rects.extend([rect] * min(count, 50))
                 
                 # print(f"Rectángulos únicos: {len(rect_counter)}")
                 # print(f"Rectángulos disponibles (máx 2 por tipo): {len(available_rects)}")
