@@ -1,47 +1,19 @@
 import hr_algorithm as hr
 import torch
 import numpy as np
+import states as st
+import categories as cat
 
 # ----------------------------
 # Funciones del algoritmo HR (simplificado)
 # ----------------------------
 
-def codificar_estado(spaces, rects, espacio_seleccionado, largo_max):
+
+def codificar_estado(spaces, rects, espacio_seleccionado, W, Href=20):
     """
-    Codifica el estado actual como una lista de vectores [h, w, area, a_utilizar, contexto].
-    - spaces: lista de subespacios disponibles [(x, y, w, h), ...]
-    - rects: lista de bloques pendientes [(w, h), ...]
-    - espacio_seleccionado: tupla (x, y, w, h) del espacio seleccionado para colocar un rectángulo.
+    Codifica el estado actual para el modelo
     """
-    # Buscar el índice del espacio seleccionado (match exacto)
-    idx_seleccionado = -1
-    for idx, s in enumerate(spaces):
-        if s == espacio_seleccionado:
-            idx_seleccionado = idx
-            break
-
-    estado = []
-    # Codificar subespacios
-    for idx, (x, y, w, h) in enumerate(spaces):
-        area = w * h
-        a_utilizar = 1 if idx == idx_seleccionado else 0
-        contexto = 1  # Es un subespacio utilizable
-        estado.append([h, w, area, a_utilizar, contexto])
-    # Codificar bloques pendientes
-    for (w, h) in rects:
-        area = w * h
-        a_utilizar = 0
-        contexto = 0  # Es un bloque pendiente, no un subespacio
-        estado.append([h, w, area, a_utilizar, contexto])
-
-    # Asegurarse de que el estado tenga largo máximo
-    while len(estado) < largo_max:
-        estado.append([0, 0, 0, 0, 0])  # Rellenar con ceros
-
-    return estado
-
-
-
+    return st.codificar_estado(spaces, rects, espacio_seleccionado, W, Href, include_xy=True)
 
 def rect_fits_in_space(rect, space):
     rw, rh = rect
@@ -74,6 +46,24 @@ def divide_space(space, rect, pos):
 
     return S1, S2
 
+def procesar_estado_para_modelo(estado_raw, largo_max=18):
+    """
+    Convierte un estado raw a formato listo para el modelo (aplanado, sin seq_id)
+    """
+    # Aplanar directamente sin agregar seq_id
+    state_flat = []
+    for space in estado_raw[0]:  # Espacios
+        state_flat.append(space)
+    for rect in estado_raw[1]:   # Rectángulos
+        state_flat.append(rect)
+    
+    # Padding
+    while len(state_flat) < largo_max:
+        state_flat.append([0] * 12)  # Vector de padding con 12 elementos
+
+    return state_flat, estado_raw
+
+
 
 # Dividir el espacio en S3 y S4
 def divide_space_2(space, rect, pos):
@@ -89,21 +79,23 @@ def divide_space_2(space, rect, pos):
 
     return S3, S4
 
-def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, largo_max ,model, device="cpu", acciones_modelo=None, logits_modelo=None):
+def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, largo_max, model, container_width, device="cpu", acciones_modelo=None, logits_modelo=None):
     if not rects:
         return
 
-    # Codifica el estado actual
-    estado = estados[-1] 
+    # El estado ya viene procesado desde la función principal
+    estado_flat = estados[-1]  # Ya está aplanado y listo para usar
 
-    # Prepara el estado para el modelo
-    x = torch.tensor([estado], dtype=torch.float32).to(device)  # [1, seq_len, features]
+    encoder_input = torch.tensor([estado_flat], dtype=torch.float32).to(device)
+    decoder_input = torch.tensor([[9]], dtype=torch.long).to(device)
+    
     with torch.no_grad():
-        logits = model(x)  # [1, num_classes]
-        probs = torch.softmax(logits, dim=-1)  # [1, num_classes]
+        logits = model(encoder_input, decoder_input)[:, -1, :]
+        probs = torch.softmax(logits, dim=-1)
         probs_np = probs.cpu().numpy().flatten()
-        # Enmascara las clases no válidas
-        probs_np[len(rects):] = -float('inf')
+        
+        if len(probs_np) > len(rects):
+            probs_np[len(rects):] = -float('inf')
         action_idx = int(np.argmax(probs_np))
 
     acciones_modelo.append(action_idx)  
@@ -117,33 +109,26 @@ def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, 
 
     # Busca el rectángulo correspondiente a la acción
     if action_idx >= len(rects):
-        # print(f"Acción inválida: {action_idx} (rects disponibles: {len(rects)})")
-        return  # Acción inválida
-    rect = rects[action_idx-1 ]  # -1 porque el índice comienza en 1
-    # print(f"[Recursivo] Rectángulo elegido: {rect}")
-
+        return
+    rect = rects[action_idx]
     fits, rotation = rect_fits_in_space(rect, space)
+    
     if fits:
-        # Rotar el rectángulo si es necesario
         if rotation == 1:
             rect = (rect[1], rect[0])
         ok, pos = place_rect(space, rect)
 
         if ok:
-
             placed.append((rect, pos))
-            Y_rect.append(hr.codificar_y_estado(estados[-1], rect))
-            # print(f"[Recursivo] Rectángulo {rect} colocado en ({space[2]},{space[3]})")
-            
+            Y_rect.append(action_idx)  # Simplificación temporal
+            print(f"Indice elegido: {action_idx}")
+
             S3, S4 = divide_space_2(space, rect, pos)
-            # print(f"[Recursivo] División: S3={S3}, S4={S4}\n")
             temp_spaces = spaces.copy()
             temp_spaces.append(S3)
             temp_spaces.append(S4)
 
-            # Y_rect.append(rect)
-            # Eliminar rectángulo usado
-            rects.pop(action_idx-1)
+            rects.pop(action_idx)
 
 
             # Mostrar cuál espacio es más grande: S3 o S4
@@ -154,129 +139,153 @@ def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, 
                 return
 
             if area_S3 > area_S4:
-                estado = codificar_estado(temp_spaces, rects, S3, largo_max)
-                estados.append(estado)
-
-                recursive_packing_con_modelo(S3, spaces, rects, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
+                estado_raw = codificar_estado(temp_spaces, rects, S3, container_width)  # container_width=20 por defecto
+                state_flat_nuevo, _ = procesar_estado_para_modelo(estado_raw, largo_max)
+                estados.append(state_flat_nuevo)
+                print(f"Estado codificado (S3): {state_flat_nuevo}")
+                recursive_packing_con_modelo(S3, spaces, rects, placed, estados, Y_rect, largo_max, model, container_width, device, acciones_modelo, logits_modelo)
                 temp_spaces.remove(S3)
 
                 if not rects:
                     return # Termina esta rama recursiva
 
-                Y_rect.append(hr.codificar_y_estado(estados[-1], rect))
-                estado = codificar_estado(temp_spaces, rects, S4, largo_max)
-                estados.append(estado)
-
-                recursive_packing_con_modelo(S4, spaces, rects, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
+                Y_rect.append(hr.codificar_y_rect_con_lista(rects, rect))
+                print(f"Indice elegido: {hr.codificar_y_rect_con_lista(rects, rect)}")
+                estado_raw = codificar_estado(temp_spaces, rects, S4, container_width)
+                state_flat_nuevo, _ = procesar_estado_para_modelo(estado_raw, largo_max)
+                estados.append(state_flat_nuevo)
+                print(f"Estado codificado (S4): {state_flat_nuevo}")
+                recursive_packing_con_modelo(S4, spaces, rects, placed, estados, Y_rect, largo_max, model, container_width, device, acciones_modelo, logits_modelo)
                 temp_spaces.remove(S4)
             else:
-                estado = codificar_estado(temp_spaces, rects, S4, largo_max)
-                estados.append(estado)
-
-                recursive_packing_con_modelo(S4, spaces, rects, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
+                estado_raw = codificar_estado(temp_spaces, rects, S4, container_width)
+                state_flat_nuevo, _ = procesar_estado_para_modelo(estado_raw, largo_max)
+                estados.append(state_flat_nuevo)
+                print(f"Estado codificado (S4): {state_flat_nuevo}")
+                recursive_packing_con_modelo(S4, spaces, rects, placed, estados, Y_rect, largo_max, model, container_width, device, acciones_modelo, logits_modelo)
                 temp_spaces.remove(S4)
 
                 if not rects:
                     return  # Termina esta rama recursiva
 
-                Y_rect.append(hr.codificar_y_estado(estados[-1], rect))
-                estado = codificar_estado(temp_spaces, rects, S3, largo_max)
-                estados.append(estado)
+                Y_rect.append(hr.codificar_y_rect_con_lista(rects, rect))
+                print(f"Indice elegido: {hr.codificar_y_rect_con_lista(rects, rect)}")
 
-                recursive_packing_con_modelo(S3, spaces, rects, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
+                estado_raw = codificar_estado(temp_spaces, rects, S3, container_width)
+                state_flat_nuevo, _ = procesar_estado_para_modelo(estado_raw, largo_max)
+                estados.append(state_flat_nuevo)
+                print(f"Estado codificado (S3): {state_flat_nuevo}")
+                recursive_packing_con_modelo(S3, spaces, rects, placed, estados, Y_rect, largo_max, model, container_width, device, acciones_modelo, logits_modelo)
                 temp_spaces.remove(S3)
             return  # Termina esta rama recursiva
 
-
-
-
-def hr_packing_con_modelo(spaces, rects, model, device="cpu"):
+def hr_packing_con_modelo(spaces, rects, model, device="cpu", container_width=0, category="C1"):
     placed = []
     rects1 = rects.copy()
     estados = []
     Y_rect = []
     acciones_modelo = []
     logits_modelo = []  
-    largo_max = len(rects) + 1  # Largo máximo del estado
-    estado = codificar_estado(spaces, rects1, spaces[0],largo_max )
-
-    estados.append(estado)
+    largo_max = cat.CATEGORIES[category]["num_items"] + 1  # Tu modelo espera 18 elementos
 
     while rects1:
         colocado = False
-        # Prepara el estado para el modelo
-        x = torch.tensor([estado], dtype=torch.float32).to(device)  # [1, seq_len, features]
+        
+        # Codificar estado actual
+        estado_raw = codificar_estado(spaces, rects1, spaces[0], container_width)
+        # print(f"Estado codificado raw: {len(estado_raw[0])} espacios, {len(estado_raw[1])} rects")
+        
+        # Procesar estado sin seq_id
+        state_flat, estado_procesado = procesar_estado_para_modelo(estado_raw, largo_max)
+        
+        # print(f"State_flat length: {len(state_flat)}")
+        # if len(state_flat) > 0:
+        #     print(f"Primer elemento length: {len(state_flat[0])}")
+        
+        estados.append(state_flat)
+        print(f"Estado codificado actual: {state_flat}")
+        # Prepara el estado para el modelo encoder-decoder
+        encoder_input = torch.tensor([state_flat], dtype=torch.float32).to(device)  # [1, 18, 12]
+        decoder_input = torch.tensor([[9]], dtype=torch.long).to(device)  # [1, 1] start token
+        
         with torch.no_grad():
-            logits = model(x)  # [1, num_classes]
-            probs = torch.softmax(logits, dim=-1)  # [1, num_classes]
+            # Forward pass con ambos inputs
+            logits = model(encoder_input, decoder_input)[:, -1, :]  # [1, num_classes]
+            
+            probs = torch.softmax(logits, dim=-1)
             probs_np = probs.cpu().numpy().flatten()
+            
             # Enmascara las clases no válidas
-            probs_np[len(rects1):] = -float('inf')
+            if len(probs_np) > len(rects1):
+                probs_np[len(rects1):] = -float('inf')
             action_idx = int(np.argmax(probs_np))
         
         acciones_modelo.append(action_idx)  
         logits_modelo.append(logits.cpu().numpy().flatten()) 
-        # print(f"[Iteración] Estado actual: {estado}")
-        # print(f"Probabilidades: {probs.cpu().numpy().round(3).tolist()}")
-        # print(f"Rectángulos disponibles: {rects1}")
-        # print(f"Índice elegido: {action_idx}")
 
-        if action_idx >= len(rects1):
-            # print(f"Acción inválida: {action_idx} (rects disponibles: {len(rects1)})")
-            break
-        rect = rects1[action_idx-1]
+        # Resto de la lógica de colocación...
+        if action_idx < len(rects1):
+            rect = rects1[action_idx]
         # print(f"Rectángulo elegido: {rect}")
         # Busca un espacio donde quepa
-        for space in spaces:
+            for space in spaces:
+                fits, rotation = hr.rect_fits_in_space(rect, space)
+                if fits:
+                    if rotation == 1:
+                        rect = (rect[1], rect[0])
+                    ok, pos = hr.place_rect(space, rect)
 
-            fits, rotation = hr.rect_fits_in_space(rect, space)
-            # print(f"Probando espacio {space} para rectángulo {rect}: {'Encaja' if fits else 'No encaja'} (rotación: {rotation})")
-            if fits:
-
-                if rotation == 1:
-                    rect = (rect[1], rect[0])
-                ok, pos = hr.place_rect(space, rect)
-
-                if ok:
-
-                    temp_spaces = []
-                    placed.append((rect, pos))
-                    # print(f"Rectángulo {rect} colocado en ({space[2]},{space[3]})")
-
-                    Y_rect.append(hr.codificar_y_estado(estado, rect))
-
-                    # Dividir el espacio en S1 (encima, unbounded) y S2 (derecha, bounded)
-
-                    S1, S2 = hr.divide_space(space, rect, pos)
-                    temp_spaces.append(S1)
-                    temp_spaces.append(S2)
-
-                    # print(f"Dividiendo espacio {space} en S1={S1} (encima) y S2={S2} (derecha)\n")
-                    # Eliminar rectángulo insertado y espacio usado
-                    rects1.pop(action_idx-1)
-                    spaces.remove(space)
-
-                    if rects1:  # Solo codificar el estado si quedan rectángulos
-                        estado = codificar_estado(temp_spaces, rects1, S2, largo_max)
-                        estados.append(estado)
+                    if ok:
+                        temp_spaces = []
+                        placed.append((rect, pos))
                         
-                    # Agregar S1 al espacio disponible para seguir iterando
-                    spaces.append(S1)
-                    # Llamar recursivamente a RecursivePacking con S2 (bounded)
-                    recursive_packing_con_modelo(S2, spaces, rects1, placed, estados, Y_rect, largo_max, model, device, acciones_modelo, logits_modelo)
+                        # Para Y_rect, usar el estado procesado
+                        Y_rect.append(hr.codificar_y_rect_con_lista(rects, rect))
+                        print(f"Indice elegido: {action_idx}")
 
-                    if rects1:
-                        Y_rect.append(hr.codificar_y_estado(estados[-1], rect))
+                        S1, S2 = hr.divide_space(space, rect, pos)
+                        temp_spaces.append(S1)
+                        temp_spaces.append(S2)
+
+                        rects1.pop(action_idx)
+                        spaces.remove(space)
+
+                        if rects1:
+                            # Nuevo estado sin seq_id
+                            estado_nuevo_raw = codificar_estado(temp_spaces, rects1, S2, container_width)
+                            state_flat_nuevo, estado_nuevo_procesado = procesar_estado_para_modelo(
+                                estado_nuevo_raw, largo_max
+                            )
+                            estados.append(state_flat_nuevo)
                         
-                    colocado = True
+                        spaces.append(S1)
+                        recursive_packing_con_modelo(S2, spaces, rects1, placed, estados, Y_rect, largo_max, model, container_width, device, acciones_modelo, logits_modelo)
 
-                    estado = codificar_estado(spaces, rects1, S1, largo_max)
-                    estados.append(estado)
+                        if rects1:
+                            Y_rect.append(hr.codificar_y_rect_con_lista(rects1, rect))
+                            print(f"Indice elegido: {hr.codificar_y_rect_con_lista(rects1, rect)}")
 
-                    break
+                            
+                        colocado = True
+
+                        # Estado final sin seq_id
+                        estado_final_raw = codificar_estado(spaces, rects1, S1, container_width)
+                        state_flat_final, _ = procesar_estado_para_modelo(
+                            estado_final_raw, largo_max
+                        )
+                        estados.append(state_flat_final)
+                        print(f"Estado codificado final: {state_flat_final}")
+                        break
+                        
         if not colocado:
             break
     return placed, estados, Y_rect, acciones_modelo, logits_modelo
+
+
+
+
+
+
 
 
 def ordenar_por_area(rects):
@@ -285,9 +294,8 @@ def ordenar_por_area(rects):
 def calcular_altura(placements):
     return max([y + h for (_, (x, y)), (w, h) in zip(placements, [p[0] for p in placements])], default=0)
 
-
-def heuristic_recursion_transformer(rects, container_width, model, device="cpu"):
-    rects = ordenar_por_area(rects)
+def heuristic_recursion_transformer(rects, container_width, model, device="cpu", category="C1"):
+    # rects = ordenar_por_area(rects)
     best_height = float('inf')
     best_placements = []
     rect_sequence = []
@@ -295,33 +303,37 @@ def heuristic_recursion_transformer(rects, container_width, model, device="cpu")
     all_states = []
     all_Y_rect = []
 
-    for i in range(len(rects) - 1):
-        for j in range(i + 1, len(rects)):
-            temp_rects = rects.copy()
-            temp_rects[i], temp_rects[j] = temp_rects[j], temp_rects[i]
-            # print(f"Probando permutación: {temp_rects}")
-            placements, estados, Y_rect = hr_packing_con_modelo(
-                spaces=[(0, 0, container_width, 1000)],
-                rects=temp_rects,
-                model=model,
-                device=device
-            )
-            used_heights = [pos[1] + rect[1] for rect, pos in placements]
-            altura = max(used_heights) if used_heights else 0
+    # for i in range(len(rects) - 1):
+    #     for j in range(i + 1, len(rects)):
+    temp_rects = rects.copy()
+    #         print(f"Probando permutación: {i}, {j}")
+    #         temp_rects[i], temp_rects[j] = temp_rects[j], temp_rects[i]
+            
+    try:
+        placements, estados, Y_rect, acciones_modelo, logits_modelo = hr_packing_con_modelo(
+            spaces=[(0, 0, container_width, 1000)],
+            rects=temp_rects,
+            model=model,
+            device=device,
+            container_width=container_width,
+            category=category
+        )
+                
+        used_heights = [pos[1] + rect[1] for rect, pos in placements]
+        altura = max(used_heights) if used_heights else 0
 
-            if altura <= best_height:
-                # print(f"Mejor altura encontrada: {altura} con rectángulos {temp_rects}")
-                rect_sequence = temp_rects.copy()
-                best_height = altura
-                best_placements = placements
-
-
-            all_states.append(estados)
-            all_Y_rect.append(Y_rect)
-    
+        if altura <= best_height:
+            rect_sequence = temp_rects.copy()
+            best_height = altura
+            best_placements = placements
+        all_states.append(estados)
+        all_Y_rect.append(Y_rect)
+                
+    except Exception as e:
+        print(f"Error: {e}")
+        
 
     return best_placements, best_height, rect_sequence, all_states, all_Y_rect
-
 
 
 

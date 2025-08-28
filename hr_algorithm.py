@@ -2,16 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import random
 import states as st
-
-CATEGORIES = {
-    "C1": {"num_items": 17, "width": 20, "height": 20},
-    "C2": {"num_items": 25, "width": 40, "height": 15},
-    "C3": {"num_items": 29, "width": 60, "height": 30},
-    "C4": {"num_items": 49, "width": 60, "height": 60},
-    "C5": {"num_items": 73, "width": 60, "height": 90},
-    "C6": {"num_items": 97, "width": 80, "height": 120},
-    "C7": {"num_items": 197, "width": 160, "height": 240},
-}
+import categories as cat
 
 # ----------------------------
 # Funciones del algoritmo HR (simplificado)
@@ -163,7 +154,7 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, c
 
                     # print(f"Área S3: {area_S3}, {S3[2]},{S3[3]} Área S4: {area_S4}, {S4[2]},{S4[3]}")
                     if area_S3 > area_S4:
-                        estado = st.codificar_estado(temp_spaces, rects, S3, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
+                        estado = st.codificar_estado(temp_spaces, rects, S3, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
                         estados.append(estado)
 
                         recursive_packing(S3, spaces, rects, placed, estados, Y_rect, category)
@@ -173,13 +164,13 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, c
                             return # Termina esta rama recursiva
 
                         Y_rect.append(codificar_y_rect_con_lista(rects, rect))
-                        estado = st.codificar_estado(temp_spaces, rects, S4, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
+                        estado = st.codificar_estado(temp_spaces, rects, S4, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
                         estados.append(estado)
 
                         recursive_packing(S4, spaces, rects, placed, estados, Y_rect, category)
                         temp_spaces.remove(S4)
                     else:
-                        estado = st.codificar_estado(temp_spaces, rects, S4, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
+                        estado = st.codificar_estado(temp_spaces, rects, S4, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
                         estados.append(estado)
 
                         recursive_packing(S4, spaces, rects, placed, estados, Y_rect, category)
@@ -189,7 +180,7 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, c
                             return  # Termina esta rama recursiva
 
                         Y_rect.append(codificar_y_rect_con_lista(rects, rect))
-                        estado = st.codificar_estado(temp_spaces, rects, S3, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
+                        estado = st.codificar_estado(temp_spaces, rects, S3, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
                         estados.append(estado)
 
                         recursive_packing(S3, spaces, rects, placed, estados, Y_rect, category)
@@ -204,7 +195,7 @@ def hr_packing(spaces, rects, category=""):
 
     estados = []  # Lista para almacenar los estados codificados
     Y_rect = []  # Lista para almacenar los índices de los rectángulos elegidos
-    estado = st.codificar_estado(spaces, rects1, spaces[0], CATEGORIES[category]['width'], CATEGORIES[category]['height'])  # Estado inicial
+    estado = st.codificar_estado(spaces, rects1, spaces[0], cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])  # Estado inicial
     estados.append(estado)  # Estado inicial
 
     while rects1:
@@ -236,7 +227,7 @@ def hr_packing(spaces, rects, category=""):
                         spaces.remove(space)
 
                         if rects1:  # Solo codificar el estado si quedan rectángulos
-                            estado = st.codificar_estado(temp_spaces, rects1, S2, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
+                            estado = st.codificar_estado(temp_spaces, rects1, S2, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
                             estados.append(estado)
                             
                         # Agregar S1 al espacio disponible para seguir iterando
@@ -250,7 +241,7 @@ def hr_packing(spaces, rects, category=""):
 
                         placed_flag = True
 
-                        estado = st.codificar_estado(spaces, rects1, S1, CATEGORIES[category]['width'], CATEGORIES[category]['height'])
+                        estado = st.codificar_estado(spaces, rects1, S1, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
                         estados.append(estado)
                         
                         break  
