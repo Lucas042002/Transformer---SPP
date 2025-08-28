@@ -78,7 +78,7 @@ def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, 
     estado_flat = estados[-1]  # Ya está aplanado y listo para usar
     encoder_input = torch.tensor([estado_flat], dtype=torch.float32).to(device)
     # Antes de llamar al modelo:
-    decoder_seq = [9] + acciones_modelo  # historial de acciones previas
+    decoder_seq = [19] + acciones_modelo  # historial de acciones previas
     decoder_input = torch.tensor([decoder_seq], dtype=torch.long).to(device)
     with torch.no_grad():
         logits = model(encoder_input, decoder_input)[:, -1, :]
@@ -88,6 +88,10 @@ def recursive_packing_con_modelo(space, spaces, rects, placed, estados, Y_rect, 
         if len(probs_np) > len(rects):
             probs_np[len(rects):] = -float('inf')
         action_idx = int(np.argmax(probs_np))
+
+    if action_idx == 18:
+        print("Modelo predijo end_token, terminando inferencia.")
+        return
 
     acciones_modelo.append(action_idx)  
     logits_modelo.append(logits.cpu().numpy().flatten()) 
@@ -197,8 +201,9 @@ def hr_packing_con_modelo(spaces, rects, model, device="cpu", container_width=0,
         estados.append(state_flat)
         # Prepara el estado para el modelo encoder-decoder
         encoder_input = torch.tensor([state_flat], dtype=torch.float32).to(device)  # [1, 18, 12]
-        decoder_input = torch.tensor([[9]], dtype=torch.long).to(device)  # [9, 1] start token
-        
+        decoder_seq = [19] + acciones_modelo  # historial de acciones previas
+        decoder_input = torch.tensor([decoder_seq], dtype=torch.long).to(device)
+
         with torch.no_grad():
             # Forward pass con ambos inputs
             logits = model(encoder_input, decoder_input)[:, -1, :]  # [1, num_classes]
@@ -209,6 +214,11 @@ def hr_packing_con_modelo(spaces, rects, model, device="cpu", container_width=0,
             if len(probs_np) > len(rects1):
                 probs_np[len(rects1):] = -float('inf')
             action_idx = int(np.argmax(probs_np))
+
+        # Si el modelo predice end_token, termina el ciclo
+        if action_idx == 18:
+            print("Modelo predijo end_token, terminando inferencia.")
+            break
 
         acciones_modelo.append(action_idx)
         logits_modelo.append(logits.cpu().numpy().flatten())

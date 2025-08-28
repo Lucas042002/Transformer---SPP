@@ -386,12 +386,12 @@ def procesar_datos_entrada_encoder_decoder_adapted(X_tensor, Y_tensor, verbose=F
     # Opción 1: Usar cada decisión individual como una secuencia de longitud 1
     # con start token + decision + end token
     Y_decoder = []
-    start_token = 9  # Token de inicio
-    end_token = 8    # Token de fin (puedes usar otro número)
-    
+    start_token = 19  # Token de inicio
+    end_token = 18  # Token de fin (puedes usar otro número)
+
     for y in Y_tensor:
         # Crear secuencia: [start_token, decision, end_token]
-        sequence = [start_token, int(y.item())]
+        sequence = [start_token, int(y.item()), end_token]
         Y_decoder.append(sequence)
     
     # Convertir a array

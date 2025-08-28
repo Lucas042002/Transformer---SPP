@@ -18,7 +18,7 @@ import categories as cat
 # ----------------------------
 # Elegir categoría y cantidad de problemas
 categoria = "C1"  # Cambia aquí la categoría
-cantidad = 100    # Cambia aquí la cantidad de problemas a generar
+cantidad = 1    # Cambia aquí la cantidad de problemas a generar
 exportar = False  # Cambia a True si quieres guardar los archivos
 problemas, ancho, alto = gen.generate_problems_guillotine(categoria, cantidad, export=exportar)
 max_len = cat.CATEGORIES[categoria]["num_items"] + 1  # +1 para seq_id
@@ -116,7 +116,7 @@ model = tr.SPPTransformer(
     d_ff=512,
     num_layers=6,
     input_dim=12,  # 12 features sin seq_id
-    num_classes=18,  # 17 rectángulos + tokens especiales
+    num_classes=20,  # 17 rectángulos + tokens especiales
     max_len=max_len+2,  # Usar max_len definido arriba
     dropout=0.1
 ).to('cpu')
@@ -124,7 +124,7 @@ model = tr.SPPTransformer(
 train_loader, val_loader, _, _ = tr.procesar_datos_entrada_encoder_decoder_adapted(
     X_tensor, Y_tensor, verbose=True
 )
-#Entrenar
+# Entrenar
 #optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 #criterion = nn.CrossEntropyLoss(ignore_index=0)
 #train_losses, val_accuracies = tr.entrenar_spp_transformer(
@@ -136,7 +136,7 @@ train_loader, val_loader, _, _ = tr.procesar_datos_entrada_encoder_decoder_adapt
 #    d_ff=512,
 #    num_layers=6,
 #    input_dim=12,  # Tus 12 features de estado
-#    num_classes=18,  # 17 rectángulos + tokens especiales
+#    num_classes=20,  # 17 rectángulos + 1 espacio + 2 tokens especiales
 #    max_len=max_len+2,  # Usar max_len definido arriba
 #    dropout=0.1
 #).to('cpu')
@@ -166,7 +166,7 @@ with torch.no_grad():
         decoder_input = torch.tensor([[9]], dtype=torch.long)  # Start token
         test_output = model(test_input, decoder_input)
         print(f"Salida del modelo shape: {test_output.shape}")
-        print("✓ Modelo funciona correctamente")
+        print("Modelo funciona correctamente")
     except Exception as e:
         print(f"Error en modelo: {e}")
 
@@ -195,7 +195,7 @@ with torch.no_grad():
 #         return prediction, probs.cpu().numpy().flatten()
 
 # Usar el modelo entrenado con HR_Transformer
-#print(f"\n--- Probando modelo con HR_Transformer ---")
+print(f"\n--- Probando modelo con HR_Transformer ---")
 for idx, rects_test in enumerate(problemas_test):
     #print(f"\nResolviendo problema de prueba {idx+1} con modelo entrenado:")
     #print(f"Rectángulos: {rects_test}")
