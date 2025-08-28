@@ -18,7 +18,7 @@ import categories as cat
 # ----------------------------
 # Elegir categoría y cantidad de problemas
 categoria = "C1"  # Cambia aquí la categoría
-cantidad = 1    # Cambia aquí la cantidad de problemas a generar
+cantidad = 100    # Cambia aquí la cantidad de problemas a generar
 exportar = False  # Cambia a True si quieres guardar los archivos
 problemas, ancho, alto = gen.generate_problems_guillotine(categoria, cantidad, export=exportar)
 max_len = cat.CATEGORIES[categoria]["num_items"] + 1  # +1 para seq_id
@@ -124,25 +124,23 @@ model = tr.SPPTransformer(
 train_loader, val_loader, _, _ = tr.procesar_datos_entrada_encoder_decoder_adapted(
     X_tensor, Y_tensor, verbose=True
 )
-# Entrenar
-# optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-# criterion = nn.CrossEntropyLoss(ignore_index=0)
-# train_losses, val_accuracies = tr.entrenar_spp_transformer(
-#     model, train_loader, val_loader, optimizer, criterion, epochs=50
-# )
-# print("Entrenamiento completado!")
-
-# model = tr.SPPTransformer(
-#     d_model=256,
-#     num_heads=8,
-#     d_ff=512,
-#     num_layers=6,
-#     input_dim=12,  # Tus 12 features de estado
-#     num_classes=18,  # 17 rectángulos + tokens especiales
-#     max_len=max_len+2,  # Usar max_len definido arriba
-#     dropout=0.1
-# ).to('cpu')
-# Cargar modelo entrenado
+#Entrenar
+#optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+#criterion = nn.CrossEntropyLoss(ignore_index=0)
+#train_losses, val_accuracies = tr.entrenar_spp_transformer(
+#    model, train_loader, val_loader, optimizer, criterion, epochs=50
+#)
+#model = tr.SPPTransformer(
+#    d_model=256,
+#    num_heads=8,
+#    d_ff=512,
+#    num_layers=6,
+#    input_dim=12,  # Tus 12 features de estado
+#    num_classes=18,  # 17 rectángulos + tokens especiales
+#    max_len=max_len+2,  # Usar max_len definido arriba
+#    dropout=0.1
+#).to('cpu')
+#Cargar modelo entrenado
 checkpoint = tr.cargar_modelo(model, "models/spp_transformer_c1_epochs50.pth")
 
 # ----------------------------
@@ -173,12 +171,12 @@ with torch.no_grad():
         print(f"Error en modelo: {e}")
 
 
-# # Función helper para usar el modelo en inferencia
-# def predecir_con_modelo(model, estado_codificado, device='cpu'):
-#     """
-#     Usa el modelo encoder-decoder para predecir la próxima acción
-#     """
-#     model.eval()
+# Función helper para usar el modelo en inferencia
+#def predecir_con_modelo(model, estado_codificado, device='cpu'):
+#    """
+#    Usa el modelo encoder-decoder para predecir la próxima acción
+#    """
+#    model.eval()
 #     with torch.no_grad():
 #         # Encoder input: estado actual
 #         encoder_input = torch.tensor([estado_codificado], dtype=torch.float32).to(device)
@@ -197,10 +195,10 @@ with torch.no_grad():
 #         return prediction, probs.cpu().numpy().flatten()
 
 # Usar el modelo entrenado con HR_Transformer
-print(f"\n--- Probando modelo con HR_Transformer ---")
+#print(f"\n--- Probando modelo con HR_Transformer ---")
 for idx, rects_test in enumerate(problemas_test):
-    print(f"\nResolviendo problema de prueba {idx+1} con modelo entrenado:")
-    print(f"Rectángulos: {rects_test}")
+    #print(f"\nResolviendo problema de prueba {idx+1} con modelo entrenado:")
+    #print(f"Rectángulos: {rects_test}")
 
     # Llamar a HR_Transformer con el modelo cargado
     placements_modelo, altura_modelo, rect_sequence_modelo, all_states_modelo, all_Y_rect_modelo = hr_tr.heuristic_recursion_transformer(
@@ -211,21 +209,19 @@ for idx, rects_test in enumerate(problemas_test):
         category=categoria
     )
 
-    # print(f"Altura conseguida con modelo: {altura_modelo}")
-    # print(f"Secuencia de rectángulos: {rect_sequence_modelo}")
-    # print(f"Número de estados explorados: {len(all_states_modelo)}")
-    
-    # # Comparar con HR original
-    # print(f"\n--- Comparación con HR original ---")
-    # placements_hr, altura_hr, rect_sequence_hr, all_states_hr, all_Y_rect_hr, _, _ = hr.heuristic_recursion(
-    #     rects=rects_test.copy(), 
-    #     container_width=ancho_test, 
-    #     category=categoria
-    # )
-    
-    # print(f"Altura HR original: {altura_hr}")
-    # print(f"Altura con modelo: {altura_modelo}")
-    # print(f"Mejora: {((altura_hr - altura_modelo) / altura_hr * 100):.2f}%" if altura_hr > 0 else "N/A")
+    print(f"Altura conseguida con modelo: {altura_modelo}")
+    print(f"Secuencia de rectángulos: {rect_sequence_modelo}")
+    print(f"Número de estados explorados: {len(all_states_modelo)}")
+    # Comparar con HR original
+    print(f"\n--- Comparación con HR original ---")
+    placements_hr, altura_hr, rect_sequence_hr, all_states_hr, all_Y_rect_hr, _, _ = hr.heuristic_recursion(
+        rects=rects_test.copy(), 
+        container_width=ancho_test, 
+        category=categoria
+    )
+    print(f"Altura HR original: {altura_hr}")
+    print(f"Altura con modelo: {altura_modelo}")
+    print(f"Mejora: {((altura_hr - altura_modelo) / altura_hr * 100):.2f}%" if altura_hr > 0 else "N/A")
 
 # ----------------------------
 # Probar predicciones individuales
