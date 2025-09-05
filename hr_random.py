@@ -81,18 +81,38 @@ def codificar_estado(spaces, rects, espacio_seleccionado):
         estado.append([h, w, area, a_utilizar, contexto])
     return estado
 
-def codificar_y_estado(estado, rect):
+# def codificar_y_estado(estado, rect):
+#     """
+#     Devuelve un vector one-hot Y del mismo largo que el estado,
+#     con un 1 en la posición donde el bloque pendiente coincide con rect.
+#     """
+#     Y = [0] * len(estado)
+#     # Buscar el primer bloque pendiente (contexto==0) que coincida con rect
+#     for idx, v in enumerate(estado):
+#         if v[4] == 0 and ((v[1], v[0]) == rect or (v[0], v[1]) == rect):  # (w, h) == rect
+#             Y[idx] = 1
+#             break
+#     return Y
+
+def codificar_y_estado(rects_pendientes, rect):
     """
-    Devuelve un vector one-hot Y del mismo largo que el estado,
-    con un 1 en la posición donde el bloque pendiente coincide con rect.
+    rects_pendientes: lista [(w,h), ...] en el orden en que armaste R_in[0]
+    rect: (w,h) elegido por HR
+    Devuelve el índice entero (int) dentro de rects_pendientes donde se encuentra
+    el rectángulo `rect` seleccionado por el HR en este paso.
+    Devuelve el índice (1-based) o 0 si no se encuentra.
     """
-    Y = [0] * len(estado)
-    # Buscar el primer bloque pendiente (contexto==0) que coincida con rect
-    for idx, v in enumerate(estado):
-        if v[4] == 0 and ((v[1], v[0]) == rect or (v[0], v[1]) == rect):  # (w, h) == rect
-            Y[idx] = 1
+    N = len(rects_pendientes)
+    Y = 0
+
+    for idx, r in enumerate(rects_pendientes):
+        if r == rect or r == (rect[1], rect[0]):
+            Y = idx+1
             break
+
     return Y
+
+
 
 def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None):
     while rects:
@@ -109,7 +129,7 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None):
 
             if ok:
                 placed.append((rect, pos))
-                Y_rect.append(codificar_y_estado(estados[-1], rect))
+                Y_rect.append(codificar_y_estado(rects, rect))
 
                 # print(f"[Recursivo] Rectángulo {rect} colocado en ({space[2]},{space[3]})")
                 # Dividir en nuevos S3 y S4 desde el subespacio actual
@@ -141,9 +161,9 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None):
                     if not rects:
                         return  # Termina esta rama recursiva
 
-                    Y_rect.append(codificar_y_estado(estados[-1], rect))
-                    estado = codificar_estado(temp_spaces, rects, S4)
-                    estados.append(estado)
+                    # Y_rect.append(codificar_y_estado(estados[-1], rect))
+                    # estado = codificar_estado(temp_spaces, rects, S4)
+                    # estados.append(estado)
 
                     recursive_packing(S4, spaces, rects, placed, estados, Y_rect)
                     temp_spaces.remove(S4)
@@ -157,9 +177,9 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None):
                     if not rects:
                         return  # Termina esta rama recursiva
 
-                    Y_rect.append(codificar_y_estado(estados[-1], rect))
-                    estado = codificar_estado(temp_spaces, rects, S3)
-                    estados.append(estado)
+                    # Y_rect.append(codificar_y_estado(estados[-1], rect))
+                    # estado = codificar_estado(temp_spaces, rects, S3)
+                    # estados.append(estado)
 
                     recursive_packing(S3, spaces, rects, placed, estados, Y_rect)
                     temp_spaces.remove(S3)
@@ -197,7 +217,7 @@ def hr_packing_random(spaces, rects):
                     placed.append((rect, pos))
                     # print(f"Rectángulo {rect} colocado en ({space[2]},{space[3]})")
 
-                    Y_rect.append(codificar_y_estado(estado, rect))
+                    Y_rect.append(codificar_y_estado(rects1, rect))
 
 
                     # Dividir el espacio en S1 (encima, unbounded) y S2 (derecha, bounded)
@@ -220,20 +240,20 @@ def hr_packing_random(spaces, rects):
                     # temp_spaces.remove(S2)
 
                     recursive_packing(S2, spaces, rects1, placed, estados, Y_rect)
-                    if rects1:
-                        Y_rect.append(codificar_y_estado(estados[-1], rect))
+                    # if rects1:
+                    #     Y_rect.append(codificar_y_estado(estados[-1], rect))
 
                     placed_flag = True
 
-                    estado = codificar_estado(spaces, rects1, S1)
-                    estados.append(estado)
+                    # estado = codificar_estado(spaces, rects1, S1)
+                    # estados.append(estado)
                             
                     break  
                 if placed_flag:
                     break
         if not placed_flag:
             break
-    Y_rect.append(codificar_y_estado(estado, rect))         
+    # Y_rect.append(codificar_y_estado(estado, rect))         
     return placed, estados, Y_rect
 
 # ----------------------------

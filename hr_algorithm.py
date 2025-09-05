@@ -82,28 +82,14 @@ def codificar_estado(spaces, rects, espacio_seleccionado):
     return estado
 
 
-def codificar_y_estado(estado, rect):
-    """
-    Devuelve el índice entero (int) dentro de `estado` donde se encuentra
-    el rectángulo `rect` seleccionado por el HR en este paso.
-    Si no se encuentra una coincidencia válida, devuelve -1.
-    """
-    # Buscar el primer bloque pendiente (contexto==0) que coincida con rect
-    print(f"Buscando rectángulo {rect} en estado {estado} elementos\n")
-
-    for idx, v in enumerate(estado):
-        # v tiene la forma [h, w, area, a_utilizar, contexto]
-        # comparar con rect=(w,h) o (h,w) por seguridad
-        if ((v[1], v[0]) == rect or (v[0], v[1]) == rect):
-            return int(idx)
-    # Si no se encontró coincidencia, devolver -1
-    return -1
 
 def codificar_y_rect_con_lista(rects_pendientes, rect):
     """
     rects_pendientes: lista [(w,h), ...] en el orden en que armaste R_in[0]
     rect: (w,h) elegido por HR
-    Devuelve one-hot de largo N.
+    Devuelve el índice entero (int) dentro de rects_pendientes donde se encuentra
+    el rectángulo `rect` seleccionado por el HR en este paso.
+    Devuelve el índice (1-based) o 0 si no se encuentra.
     """
     N = len(rects_pendientes)
     Y = 0
@@ -141,7 +127,6 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, c
                     temp_spaces.append(S3)
                     temp_spaces.append(S4)
 
-                    # Y_rect.append(rect)
 
                     # Eliminar rectángulo usado
                     rects.pop(i)
@@ -163,9 +148,9 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, c
                         if not rects:
                             return # Termina esta rama recursiva
 
-                        Y_rect.append(codificar_y_rect_con_lista(rects, rect))
-                        estado = st.codificar_estado(temp_spaces, rects, S4, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
-                        estados.append(estado)
+                        # Y_rect.append(codificar_y_rect_con_lista(rects, rect))
+                        # estado = st.codificar_estado(temp_spaces, rects, S4, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
+                        # estados.append(estado)
 
                         recursive_packing(S4, spaces, rects, placed, estados, Y_rect, category)
                         temp_spaces.remove(S4)
@@ -179,9 +164,9 @@ def recursive_packing(space, spaces, rects, placed, estados=None, Y_rect=None, c
                         if not rects:
                             return  # Termina esta rama recursiva
 
-                        Y_rect.append(codificar_y_rect_con_lista(rects, rect))
-                        estado = st.codificar_estado(temp_spaces, rects, S3, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
-                        estados.append(estado)
+                        # Y_rect.append(codificar_y_rect_con_lista(rects, rect))
+                        # estado = st.codificar_estado(temp_spaces, rects, S3, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
+                        # estados.append(estado)
 
                         recursive_packing(S3, spaces, rects, placed, estados, Y_rect, category)
                         temp_spaces.remove(S3)
@@ -233,23 +218,21 @@ def hr_packing(spaces, rects, category=""):
                         # Agregar S1 al espacio disponible para seguir iterando
                         spaces.append(S1)
                         # Llamar recursivamente a RecursivePacking con S2 (bounded)
-                        # temp_spaces.remove(S2)
-
                         recursive_packing(S2, spaces, rects1, placed, estados, Y_rect, category)
-                        if rects1:
-                            Y_rect.append(codificar_y_rect_con_lista(rects1, rect))
+                        # if rects1:
+                        #     Y_rect.append(codificar_y_rect_con_lista(rects1, rect))
 
                         placed_flag = True
 
-                        estado = st.codificar_estado(spaces, rects1, S1, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
-                        estados.append(estado)
+                        # estado = st.codificar_estado(spaces, rects1, S1, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
+                        # estados.append(estado)
                         
                         break  
             if placed_flag:
                 break
         if not placed_flag:
             break
-    Y_rect.append(codificar_y_rect_con_lista(rects1, rect))
+    # Y_rect.append(codificar_y_rect_con_lista(rects1, rect))
     return placed, estados, Y_rect
 
 # ----------------------------
@@ -291,8 +274,8 @@ def heuristic_recursion(rects, container_width, category = ""):
                 best_placements = placements
                 all_states.append(estados)
                 all_Y_rect.append(Y_rect)
-                best_placement_states = estados
-                best_placement_Y_states = Y_rect
+                best_placement_states = [estados]
+                best_placement_Y_states = [Y_rect]
 
     
 

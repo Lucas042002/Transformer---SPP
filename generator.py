@@ -228,13 +228,13 @@ def generate_problems_guillotine(category, n_problems=1, export=False):
             print(f"Advertencia: No se pudo generar el problema {i+1} tras 100 intentos")
     
     # Visualizar solo si se generaron problemas
-    if problems and rects_with_pos:
-        hr.visualizar_packing(
-            [(rect[2:], (rect[0], rect[1])) for rect in rects_with_pos],
-            container_width=cat["width"], 
-            container_height=cat["height"], 
-            show=True
-        )
+    # if problems and rects_with_pos:
+    #     hr.visualizar_packing(
+    #         [(rect[2:], (rect[0], rect[1])) for rect in rects_with_pos],
+    #         container_width=cat["width"], 
+    #         container_height=cat["height"], 
+    #         show=True
+    #     )
     
     return problems, cat["width"], cat["height"]
 

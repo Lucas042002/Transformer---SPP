@@ -56,8 +56,7 @@ class MultiHeadAttention(nn.Module):
         weighted_values = self.W_o(weighted_values)
         
         return weighted_values, attention
-        
-        
+                
     def scale_dot_product(self, Q, K, V, mask = None):
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
         if mask is not None:
@@ -272,16 +271,100 @@ def entrenar_spp_transformer(model, train_loader, val_loader, optimizer, criteri
     
     return train_losses, val_accuracies
 
+def entrenar_spp_transformer_continuo(model, train_loader, val_loader, optimizer, criterion, 
+                                    epochs_adicionales=20, train_losses_previas=None, 
+                                    val_accuracies_previas=None, epoch_inicial=0, categoria="C1"):
+    """
+    Continúa el entrenamiento desde un checkpoint previo
+    """
+    model.train()
+    
+    # Combinar métricas previas con nuevas
+    train_losses = train_losses_previas.copy() if train_losses_previas else []
+    val_accuracies = val_accuracies_previas.copy() if val_accuracies_previas else []
+    
+    print(f"Continuando entrenamiento desde epoch {epoch_inicial + 1}")
+    print(f"Total de epochs objetivo: {epoch_inicial + epochs_adicionales}")
+    
+    best_accuracy = max(val_accuracies) if val_accuracies else 0.0
+    patience_counter = 0
+    
+    for epoch in range(epochs_adicionales):
+        epoch_actual = epoch_inicial + epoch + 1
+        total_loss = 0
+        
+        for batch_idx, (encoder_input, decoder_sequences) in enumerate(train_loader):
+            encoder_input = encoder_input.to(device)
+            decoder_sequences = decoder_sequences.to(device)
+            
+            # Teacher forcing
+            decoder_input = decoder_sequences[:, :-1]
+            decoder_target = decoder_sequences[:, 1:]
+            
+            optimizer.zero_grad()
+            logits = model(encoder_input, decoder_input)
+            
+            # Reshape para CrossEntropy
+            logits = logits.reshape(-1, logits.size(-1))
+            decoder_target = decoder_target.reshape(-1)
+            
+            loss = criterion(logits, decoder_target)
+            loss.backward()
+            
+            # Gradient clipping para estabilidad
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
+            optimizer.step()
+            total_loss += loss.item()
+        
+        avg_loss = total_loss / len(train_loader)
+        train_losses.append(avg_loss)
+        
+        val_acc = evaluar_modelo(model, val_loader)
+        val_accuracies.append(val_acc)
+        
+        # Early stopping mejorado
+        if val_acc > best_accuracy + 0.001:  # Mínima mejora requerida
+            best_accuracy = val_acc
+            patience_counter = 0
+            print(f"  *** Nueva mejor accuracy: {val_acc:.4f} ***")
+        else:
+            patience_counter += 1
+        
+        print(f'Epoch {epoch_actual}/{epoch_inicial + epochs_adicionales}, '
+              f'Loss: {avg_loss:.4f}, Val Acc: {val_acc:.4f}, '
+              f'Best: {best_accuracy:.4f}, Patience: {patience_counter}/15')
+        
+        # Early stopping si no mejora en 15 epochs
+        if patience_counter >= 15:
+            print(f"Early stopping en epoch {epoch_actual} - sin mejoras en {patience_counter} epochs")
+            break
+    
+    # Guardar modelo con métricas completas
+    epochs_totales = epoch_inicial + len(train_losses) - len(train_losses_previas) if train_losses_previas else len(train_losses)
+    guardar_modelo(model, optimizer, train_losses, val_accuracies, epochs_totales, categoria)
+    guardar_imagen_entrenamiento(train_losses, val_accuracies, categoria)
+    
+    print(f"\nReentrenamiento completado!")
+    print(f"Epochs adicionales: {len(train_losses) - len(train_losses_previas) if train_losses_previas else 0}")
+    print(f"Mejor accuracy alcanzada: {max(val_accuracies):.4f}")
+    
+    return train_losses, val_accuracies
+
 
 def guardar_modelo(model, optimizer, train_losses, val_accuracies, epochs, categoria):
     """
-    Guarda el modelo entrenado en la carpeta models
+    Guarda el modelo entrenado en la carpeta models con accuracy máxima en el nombre
     """
     # Crear carpeta models si no existe
     os.makedirs("models", exist_ok=True)
     
-    # Nombre del archivo del modelo
-    model_filename = f"models/spp_transformer_{categoria.lower()}_epochs{epochs}.pth"
+    # Calcular accuracy máxima
+    max_accuracy = max(val_accuracies) if val_accuracies else 0.0
+    
+    # Nombre del archivo con accuracy máxima (formato: 0.8745 -> 87.45)
+    accuracy_str = f"{max_accuracy:.4f}".replace("0.", "")  # 0.8745 -> 8745
+    model_filename = f"models/spp_transformer_{categoria.lower()}_acc{accuracy_str}.pth"
     
     # Guardar el modelo completo
     torch.save({
@@ -290,19 +373,25 @@ def guardar_modelo(model, optimizer, train_losses, val_accuracies, epochs, categ
         'optimizer_state_dict': optimizer.state_dict(),
         'train_losses': train_losses,
         'val_accuracies': val_accuracies,
+        'max_accuracy': max_accuracy,
         'categoria': categoria
     }, model_filename)
     
     print(f"Modelo guardado en: {model_filename}")
-    print(f"Mejor accuracy de validación: {max(val_accuracies):.4f}")
+    print(f"Accuracy máxima alcanzada: {max_accuracy:.4f}")
+
+
 
 
 def guardar_imagen_entrenamiento(train_losses, val_accuracies, categoria):
     """
-    Guarda una imagen con las curvas de entrenamiento
+    Guarda una imagen con las curvas de entrenamiento con accuracy en el nombre
     """
     # Crear carpeta img si no existe
     os.makedirs("img", exist_ok=True)
+    
+    # Calcular accuracy máxima
+    max_accuracy = max(val_accuracies) if val_accuracies else 0.0
     
     # Crear la figura
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
@@ -325,22 +414,49 @@ def guardar_imagen_entrenamiento(train_losses, val_accuracies, categoria):
     
     # Añadir información adicional
     final_loss = train_losses[-1] if train_losses else 0
-    best_acc = max(val_accuracies) if val_accuracies else 0
     
     fig.suptitle(f'Transformer Training Results - {categoria}\n'
-                f'Final Loss: {final_loss:.4f} | Best Accuracy: {best_acc:.4f}', 
+                f'Final Loss: {final_loss:.4f} | Best Accuracy: {max_accuracy:.4f}', 
                 fontsize=16, fontweight='bold')
     
     plt.tight_layout()
     
-    # Guardar la imagen
-    image_filename = f"img/training_results_{categoria.lower()}.png"
+    # Nombre con accuracy máxima
+    accuracy_str = f"{max_accuracy:.4f}".replace("0.", "")  # 0.8745 -> 8745
+    image_filename = f"img/training_results_{categoria.lower()}_acc{accuracy_str}.png"
+    
     plt.savefig(image_filename, dpi=300, bbox_inches='tight', 
                 facecolor='white', edgecolor='none')
     plt.close()
     
     print(f"Imagen guardada en: {image_filename}")
 
+def cargar_modelo(model, model_path):
+    """
+    Carga un modelo previamente guardado (actualizado para nueva estructura)
+    
+    Args:
+        model: Instancia del modelo SPPTransformer
+        model_path: Ruta del archivo del modelo
+        
+    Returns:
+        dict: Información del modelo cargado
+    """
+    checkpoint = torch.load(model_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Verificar si existe max_accuracy (modelos nuevos) o calcularlo (modelos antiguos)
+    if 'max_accuracy' in checkpoint:
+        max_acc = checkpoint['max_accuracy']
+    else:
+        max_acc = max(checkpoint['val_accuracies']) if checkpoint['val_accuracies'] else 0.0
+    
+    print(f"Modelo cargado desde: {model_path}")
+    print(f"Categoría: {checkpoint['categoria']}")
+    print(f"Epochs entrenados: {checkpoint['epoch']}")
+    print(f"Accuracy máxima: {max_acc:.4f}")
+    
+    return checkpoint
 
 def cargar_modelo(model, model_path):
     """
@@ -363,7 +479,6 @@ def cargar_modelo(model, model_path):
     
     return checkpoint
 
-
 def procesar_datos_entrada_encoder_decoder_adapted(X_tensor, Y_tensor, verbose=False):
     """
     Adapta datos ya procesados (X_tensor, Y_tensor) para el modelo encoder-decoder
@@ -377,13 +492,13 @@ def procesar_datos_entrada_encoder_decoder_adapted(X_tensor, Y_tensor, verbose=F
     """
     
     # Tus datos ya están en el formato correcto para el encoder
-    # X_tensor: (148, 17, 13) -> (batch, seq_len, features)
+    # X_tensor: (N, 17, 12) 
     X_encoder = X_tensor.float()
     
     # Para el decoder, necesitamos crear secuencias de decisiones
     # Como Y_tensor son decisiones individuales, vamos a agruparlas en secuencias
     
-    # Opción 1: Usar cada decisión individual como una secuencia de longitud 1
+    # Usar cada decisión individual como una secuencia de longitud 1
     # con start token + decision + end token
     Y_decoder = []
     start_token = 19  # Token de inicio
@@ -421,4 +536,5 @@ def procesar_datos_entrada_encoder_decoder_adapted(X_tensor, Y_tensor, verbose=F
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
     
     return train_loader, val_loader, X_encoder.shape[1], max_decoder_len
+
 
