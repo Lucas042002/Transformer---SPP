@@ -3,8 +3,24 @@ from typing import List, Tuple, Dict, Optional
 Space = Tuple[int, int, int, int]  # (x, y, w, h)
 Rect  = Tuple[int, int]           # (w, h)
 
+
 def _norm(v, den):
-    return float(v) / float(den) if den else 0.0
+    """
+    Normaliza valores entre -1 y 1 en lugar de 0 y 1
+
+    Args:
+        v: valor a normalizar
+        den: denominador (valor máximo esperado)
+    Returns:
+        float: valor normalizado entre -1 y 1
+    """
+    if den == 0:
+        return 0.0
+    # Primero normalizamos entre 0 y 1
+    norm_0_1 = float(v) / float(den)
+    # Luego convertimos de [0,1] a [-1,1]
+    return 2.0 * norm_0_1 - 1.0
+
 
 def _rect_features_sin_seqid(rect: Rect, S: Space, W: int, Href: int) -> List[float]:
     """Features de rectángulo respecto del SUBESPACIO ACTIVO S=(x,y,w,h), sin seq_id."""
@@ -20,8 +36,8 @@ def _rect_features_sin_seqid(rect: Rect, S: Space, W: int, Href: int) -> List[fl
     max_side  = max(h, w) / max_den
     min_side  = min(h, w) / max_den
 
-    fits     = (w <= Sw and h <= Sh)
-    fits_rot = (h <= Sw and w <= Sh)
+    fits      = 1.0 if (w <= Sw and h <= Sh) else -1.0
+    fits_rot  = 1.0 if (h <= Sw and w <= Sh) else -1.0
 
     if fits:
         slack_w = _norm(Sw - w, W)
@@ -67,15 +83,14 @@ def _space_features_sin_seqid(s: Space, W: int, Href: int, include_xy: bool = Tr
             h_n, 
             w_n, 
             area_n, 
-            x_n, 
-            y_n, 
-            0, # fits
-            0, # fits_rot
-            0, # slack_w
-            0, # slack_h
-            0, # waste
-            1 if S_active is not None and (x == S_active[0] and y == S_active[1] and w == S_active[2] and h == S_active[3]) else 0, # a_utilizar
-            0, # type_id
+            -1.0,  # fits (valor neutro)
+            -1.0,  # fits_rot (valor neutro)
+            -1.0,  # slack_w (valor neutro)
+            -1.0,  # slack_h (valor neutro)
+            -1.0,  # waste (valor neutro)
+            1.0 if S_active is not None and (x == S_active[0] and y == S_active[1] and 
+                                           w == S_active[2] and h == S_active[3]) else -1.0,  # a_utilizar
+            -1.0,  # type_id
         ]
     else:
         return (h_n, w_n, area_n)
@@ -124,6 +139,40 @@ def codificar_estado(
         S_in,        # (1, K, 12)
         R_in         # (1, N, 12)
     ]
+
+
+def pointer_features(
+    spaces: List[Space],
+    rects: List[Rect],
+    active_space: Space,
+    W: int,
+    Href: int,
+    include_xy: bool = True,
+):
+    """Construye directamente los features necesarios para un paso del modelo pointer.
+
+    Returns:
+        space_feat: List[float]         -> (F_space,)
+        rect_feats: List[List[float]]   -> (N, F_rect)
+        feasible_mask: List[int]        -> (N,) 1 si cabe (normal o rotado), 0 si no
+
+    Notas:
+      - Los features reusan exactamente la definición de _space_features_sin_seqid y
+        _rect_features_sin_seqid para mantener coherencia dimensional (actualmente 12).
+      - No se agrega seq_id aquí; si se necesitara, se puede anexar externamente.
+      - La máscara de factibilidad (feasible_mask) ya codifica las posiciones que deben
+        mantenerse en el softmax; las no factibles se enmascaran con -inf en los logits.
+    """
+    # Feature del espacio activo
+    space_feat = _space_features_sin_seqid(active_space, W, Href, include_xy=include_xy, S_active=active_space)
+    rect_feats = []
+    feasible_mask = []
+    for r in rects:
+        feats = _rect_features_sin_seqid(r, active_space, W, Href)
+        rect_feats.append(feats)
+        feasible = (feats[6] > 0.5) or (feats[7] > 0.5)  # fits o fits_rot
+        feasible_mask.append(1 if feasible else 0)
+    return space_feat, rect_feats, feasible_mask
 
 
 def agregar_seq_id(samples):
