@@ -54,24 +54,22 @@ def inicializar_cache_encoder(rects_originales, spaces, container_width, categor
     
     Returns:
         cached_rect_enc: embeddings pre-calculados (1, N, d_model)
-        cached_global_ctx: contexto global pre-calculado (1, d_model)
+        cached_global_ctx: NO SE USA (decode_step lo recalcula dinámicamente)
     """
     Href = cat.CATEGORIES[category]["height"]
     
-    # Construir features de TODOS los rectángulos originales
+    # Construir features de TODOS los rectángulos originales (10 dims cada uno)
     rect_feats_list = []
     for r in rects_originales:
-        # Usar un espacio "neutro" inicial para features base
-        initial_space = spaces[0] if spaces else (0, 0, container_width, 1000)
-        feats = st._rect_features_sin_seqid(r, initial_space, container_width, Href)
+        feats = st._rect_features_optimized(r, container_width, Href, rects_originales)
         rect_feats_list.append(feats)
     
     # Encodear UNA SOLA VEZ todos los rectángulos originales
     all_rect_feats = torch.tensor(rect_feats_list, dtype=torch.float32, device=device).unsqueeze(0)
     all_rect_mask = torch.ones(1, len(rects_originales), dtype=torch.bool, device=device)
-    cached_rect_enc, cached_global_ctx = model.encode_rects(all_rect_feats, all_rect_mask)
+    cached_rect_enc, _ = model.encode_rects(all_rect_feats, all_rect_mask)
     
-    return cached_rect_enc, cached_global_ctx
+    return cached_rect_enc, None  # global_ctx no se cachea (se recalcula dinámicamente)
 
 
 def usar_modelo_pointer_para_decision_optimized(
@@ -84,11 +82,14 @@ def usar_modelo_pointer_para_decision_optimized(
     step,
     rects_originales,
     cached_rect_enc, 
-    cached_global_ctx
+    cached_global_ctx  # Ya no se usa, decode_step lo recalcula
 ):
     """
     Versión OPTIMIZADA que reutiliza embeddings del encoder pre-calculados.
     Solo ejecuta el decoder en cada paso.
+    
+    El global_ctx se recalcula dinámicamente dentro de decode_step basado
+    en la máscara de factibilidad actual.
     
     Returns:
         rect_idx: índice en remaining_rects del rectángulo elegido
@@ -105,12 +106,15 @@ def usar_modelo_pointer_para_decision_optimized(
     
     for r in remaining_rects:
         # Encontrar índice en lista original
-        orig_idx = rects_originales.index(r)  # Buscar en lista original
+        orig_idx = rects_originales.index(r)
         remaining_indices.append(orig_idx)
         
         # Calcular factibilidad SOLO para este espacio específico
-        feats = st._rect_features_sin_seqid(r, active_space, container_width, Href)
-        feasible = (feats[5] > 0.5) or (feats[6] > 0.5)  # fits o fits_rot
+        rw, rh = r
+        _, _, sw, sh = active_space
+        fits_normal = (rw <= sw and rh <= sh)
+        fits_rotated = (rh <= sw and rw <= sh)
+        feasible = fits_normal or fits_rotated
         fits_mask_list.append(1 if feasible else 0)
 
     if not any(fits_mask_list):
@@ -120,12 +124,17 @@ def usar_modelo_pointer_para_decision_optimized(
     rect_enc = cached_rect_enc[:, remaining_indices, :]  # (1, N_remaining, d)
     rect_mask = torch.tensor([fits_mask_list], dtype=torch.bool, device=device)  # (1, N_remaining)
     
-    # SOLO DECODER: Space features + decode step
-    space_feat_vec = st._space_features_sin_seqid(active_space, container_width, Href, include_xy=True, S_active=active_space)
+    # SOLO DECODER: Space features + decode step (con global_ctx dinámico)
+    current_max_height = active_space[1] + active_space[3]  # y + h del espacio activo
+    spaces_context = [active_space]  # Lista minimal para compute features
+    space_feat_vec = st._space_features_optimized(
+        active_space, container_width, Href, spaces_context, current_max_height
+    )
     space_feat = torch.tensor(space_feat_vec, dtype=torch.float32, device=device).unsqueeze(0)
     
     step_idx = torch.tensor([step], dtype=torch.long, device=device)
-    probs, scores = model.decode_step(rect_enc, rect_mask, space_feat, step_idx, cached_global_ctx)
+    # decode_step ahora recalcula global_ctx dinámicamente basado en rect_mask
+    probs, scores = model.decode_step(rect_enc, rect_mask, space_feat, step_idx)
     
     # Elegir el mejor factible
     probs_cpu = probs.squeeze(0).cpu()
