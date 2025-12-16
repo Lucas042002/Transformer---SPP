@@ -1,0 +1,34 @@
+# ============================================
+# Transformer + SPP - Requirements
+# ============================================
+# Python 3.10+ requerido
+#
+# Instalación:
+#   pip install -r requirements.txt
+#
+# Para GPU (CUDA 11.8):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# ============================================
+
+# ===== CORE (Obligatorias) =====
+torch>=2.0.0                # Framework de deep learning
+numpy>=1.24.0               # Computación numérica y arrays
+matplotlib>=3.7.0           # Visualización de gráficos
+
+# ===== DATA SCIENCE (Recomendadas) =====
+pandas>=2.0.0               # Análisis de datos (para analisis_complejidad.py)
+seaborn>=0.12.0             # Visualización estadística avanzada
+scipy>=1.10.0               # Funciones científicas y estadísticas
+
+# ===== UTILIDADES (Opcionales) =====
+tqdm>=4.65.0                # Barras de progreso
+pillow>=10.0.0              # Procesamiento de imágenes (para guardar plots)
+
+# ===== VERSIONES ESPECÍFICAS PROBADAS =====
+# torch==2.1.0
+# numpy==1.26.0
+# matplotlib==3.8.0
+# pandas==2.1.1
+# seaborn==0.13.0
+# scipy==1.11.3
+# tqdm==4.66.1

@@ -1,4 +1,4 @@
-"""Heurística de packing usando el modelo pointer (SPPPointerModel).
+"""Heurística de packing usando el modelo pointer.
 
 Sigue EXACTAMENTE la misma estructura que hr_algorithm.py pero usa el modelo pointer
 para tomar las decisiones en lugar del algoritmo HR puro.
@@ -16,7 +16,7 @@ import torch
 import categories as cat
 import states as st
 from pointer_model import SPPPointerModel
-import hr_algorithm as hr  # Para reutilizar visualizar_packing y funciones geométricas
+import hr_algorithm as hr  
 
 Space = Tuple[int, int, int, int]  # (x, y, w, h)
 Rect = Tuple[int, int]
@@ -26,11 +26,13 @@ Rect = Tuple[int, int]
 # Funciones geométricas (reutilizamos las de hr_algorithm)
 # --------------------------------------------------
 def rect_fits_in_space(rect, space):
-    return hr.rect_fits_in_space(rect, space)
+    result = hr.rect_fits_in_space(rect, space)
+    # print(f"rect_fits_in_space({rect}, {space}) = {result}")
+    return result
 
 def place_rect(space, rect):
     if rect_fits_in_space(rect, space):
-        return True, (space[0], space[1])  # bottom-left
+        return True, (space[0], space[1]) 
     return False, (-1, -1)
 
 def divide_space(space, rect, pos):
@@ -44,7 +46,7 @@ def codificar_y_rect_con_lista_pointer(rects_pendientes, rect_elegido_idx):
     Convierte el índice dinámico (posición en lista remaining) a índice 1-based
     para mantener compatibilidad con la estructura de Y del HR original.
     """
-    return rect_elegido_idx + 1  # Convertir 0-based a 1-based
+    return rect_elegido_idx + 1  
 
 
 def inicializar_cache_encoder(rects_originales, spaces, container_width, category, model, device):
@@ -82,10 +84,9 @@ def usar_modelo_pointer_para_decision_optimized(
     step,
     rects_originales,
     cached_rect_enc, 
-    cached_global_ctx  # Ya no se usa, decode_step lo recalcula
+    cached_global_ctx 
 ):
     """
-    Versión OPTIMIZADA que reutiliza embeddings del encoder pre-calculados.
     Solo ejecuta el decoder en cada paso.
     
     El global_ctx se recalcula dinámicamente dentro de decode_step basado
@@ -128,7 +129,12 @@ def usar_modelo_pointer_para_decision_optimized(
     current_max_height = active_space[1] + active_space[3]  # y + h del espacio activo
     spaces_context = [active_space]  # Lista minimal para compute features
     space_feat_vec = st._space_features_optimized(
-        active_space, container_width, Href, spaces_context, current_max_height
+        active_space, 
+        container_width, 
+        Href, 
+        spaces_context, 
+        current_max_height,
+        remaining_rects=remaining_rects 
     )
     space_feat = torch.tensor(space_feat_vec, dtype=torch.float32, device=device).unsqueeze(0)
     
@@ -157,7 +163,6 @@ def recursive_packing_pointer(
     spaces, 
     rects, 
     placed, 
-    estados=None, 
     Y_rect=None, 
     category="",
     model=None, 
@@ -168,14 +173,12 @@ def recursive_packing_pointer(
     cached_rect_enc=None,
     cached_global_ctx=None):
     """
-    Versión pointer OPTIMIZADA de recursive_packing. 
     Usa embeddings pre-calculados del encoder para máxima eficiencia.
     """
     if step_counter is None:
         step_counter = [0]
     
     while rects:
-        # Usar SOLO la versión OPTIMIZADA (decoder únicamente)
         rect_idx, rect = usar_modelo_pointer_para_decision_optimized(
             rects, space, model, container_width, category, device, step_counter[0],
             rects_originales, cached_rect_enc, cached_global_ctx
@@ -206,36 +209,29 @@ def recursive_packing_pointer(
                 rects.pop(rect_idx)
                 step_counter[0] += 1
 
-                # Mostrar cuál espacio es más grande: S3 o S4
                 area_S3 = S3[2] * S3[3]
                 area_S4 = S4[2] * S4[3]
                 
                 if not rects:
-                    return  
+                    return
 
                 if area_S3 > area_S4:
-                    estado = st.codificar_estado(temp_spaces, rects, S3, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
-                    estados.append(estado)
-
-                    recursive_packing_pointer(S3, spaces, rects, placed, estados, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
+                    recursive_packing_pointer(S3, spaces, rects, placed, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
                     temp_spaces.remove(S3)
 
                     if not rects:
                         return
 
-                    recursive_packing_pointer(S4, spaces, rects, placed, estados, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
+                    recursive_packing_pointer(S4, spaces, rects, placed, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
                     temp_spaces.remove(S4)
                 else:
-                    estado = st.codificar_estado(temp_spaces, rects, S4, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
-                    estados.append(estado)
-
-                    recursive_packing_pointer(S4, spaces, rects, placed, estados, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
+                    recursive_packing_pointer(S4, spaces, rects, placed, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
                     temp_spaces.remove(S4)
                     
                     if not rects:
                         return
 
-                    recursive_packing_pointer(S3, spaces, rects, placed, estados, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
+                    recursive_packing_pointer(S3, spaces, rects, placed, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
                     temp_spaces.remove(S3)
 
                 return
@@ -250,25 +246,19 @@ def hr_packing_pointer(spaces, rects, category="", model=None, container_width=0
     """
     placed = []
     rects1 = rects.copy()
-    estados = []
     Y_rect = []
     step_counter = [0]
     
-    # OPTIMIZACIÓN: Calcular encoder UNA SOLA VEZ al inicio
+    # Calcular encoder UNA SOLA VEZ al inicio
     rects_originales = rects.copy()  # Mantener referencia original para embeddings
     cached_rect_enc, cached_global_ctx = inicializar_cache_encoder(
         rects_originales, spaces, container_width, category, model, device
     )
 
-    # Estado inicial
-    estado = st.codificar_estado(spaces, rects1, spaces[0], cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
-    estados.append(estado)
-
     while rects1:
         placed_flag = False
 
         for space in spaces:
-            # Usar modelo pointer OPTIMIZADO (solo decoder)
             rect_idx, rect = usar_modelo_pointer_para_decision_optimized(
                 rects1, space, model, container_width, category, device, step_counter[0],
                 rects_originales, cached_rect_enc, cached_global_ctx
@@ -280,7 +270,6 @@ def hr_packing_pointer(spaces, rects, category="", model=None, container_width=0
                     if ok:
                         temp_spaces = []
                         placed.append((rect, pos))
-
                         Y_rect.append(codificar_y_rect_con_lista_pointer(rects1, rect_idx))
 
                         # Dividir el espacio en S1 (encima, unbounded) y S2 (derecha, bounded)
@@ -292,15 +281,11 @@ def hr_packing_pointer(spaces, rects, category="", model=None, container_width=0
                         rects1.pop(rect_idx)
                         spaces.remove(space)
                         step_counter[0] += 1
-
-                        if rects1:  # Solo codificar el estado si quedan rectángulos
-                            estado = st.codificar_estado(temp_spaces, rects1, S2, cat.CATEGORIES[category]['width'], cat.CATEGORIES[category]['height'])
-                            estados.append(estado)
                             
                         # Agregar S1 al espacio disponible para seguir iterando
                         spaces.append(S1)
                         # Llamar recursivamente a recursive_packing_pointer con S2 (bounded) + cache
-                        recursive_packing_pointer(S2, spaces, rects1, placed, estados, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
+                        recursive_packing_pointer(S2, spaces, rects1, placed, Y_rect, category, model, container_width, device, step_counter, rects_originales, cached_rect_enc, cached_global_ctx)
 
                         placed_flag = True
                         break
@@ -308,7 +293,7 @@ def hr_packing_pointer(spaces, rects, category="", model=None, container_width=0
         if not placed_flag:
             break
             
-    return placed, estados, Y_rect
+    return placed, Y_rect
 
 
 def ordenar_por_area(rects):
@@ -330,20 +315,15 @@ def heuristic_recursion_pointer(rects, container_width, category="", model=None,
     pointer debería ser más inteligente que probar permutaciones manualmente.
     Si quieres permutaciones como el HR original, descomenta el bucle doble.
     """
-    # rects = ordenar_por_area(rects)  # Opcional: comentar si el modelo ya maneja el orden
     best_height = float('inf')
     best_placements = []
     rect_sequence = []
-
-    all_states = []
-    all_Y_rect = []
-    best_placement_states = []
-    best_placement_Y_states = []
-
+    best_Y_rect = []
+    
     # Versión simple: una sola ejecución (el modelo decide todo)
     temp_rects = rects.copy()
     
-    placements, estados, Y_rect = hr_packing_pointer(
+    placements, Y_rect = hr_packing_pointer(
         spaces=[(0, 0, container_width, 1000)],
         rects=temp_rects,
         category=category,
@@ -359,41 +339,9 @@ def heuristic_recursion_pointer(rects, container_width, category="", model=None,
         rect_sequence = rects.copy()  # Secuencia original
         best_height = altura
         best_placements = placements
-        all_states = [estados]
-        all_Y_rect = [Y_rect]
-        best_placement_states = [estados]
-        best_placement_Y_states = [Y_rect]
+        best_Y_rect = Y_rect
 
-    # Si quieres probar permutaciones como el HR original, descomenta esto:
-    """
-    for i in range(len(rects) - 1):
-        for j in range(i + 1, len(rects)):
-            temp_rects = rects.copy()
-            temp_rects[i], temp_rects[j] = temp_rects[j], temp_rects[i]
-            
-            placements, estados, Y_rect = hr_packing_pointer(
-                spaces=[(0, 0, container_width, 1000)],
-                rects=temp_rects,
-                category=category,
-                model=model,
-                container_width=container_width,
-                device=device
-            )
-            
-            used_heights = [pos[1] + rect[1] for rect, pos in placements]
-            altura = max(used_heights) if used_heights else 0
-
-            if altura < best_height:
-                rect_sequence = temp_rects.copy()
-                best_height = altura
-                best_placements = placements
-                all_states.append(estados)
-                all_Y_rect.append(Y_rect)
-                best_placement_states = [estados]
-                best_placement_Y_states = [Y_rect]
-    """
-
-    return best_placements, best_height, rect_sequence, all_states, all_Y_rect, best_placement_states, best_placement_Y_states
+    return best_placements, best_height, rect_sequence, best_Y_rect
 
 
 # Mantener compatibilidad con la interfaz anterior
@@ -419,24 +367,5 @@ def visualizar_packing(placements, container_width, container_height=None, show=
     """Usa directamente la función de hr_algorithm.py"""
     return hr.visualizar_packing(placements, container_width, container_height, show)
 
-
-if __name__ == "__main__":
-    # Pequeña prueba manual usando la nueva estructura OPTIMIZADA
-    demo_rects = [(3, 5), (4, 4), (2, 7), (5, 2)]
-    from pointer_model import SPPPointerModel
-    
-    model = SPPPointerModel()
-    print("Ejecutando prueba con encoder OPTIMIZADO (calculado una sola vez)...")
-    
-    placements, altura, rect_sequence, all_states, all_Y_rect, best_placement_states, best_placement_Y_states = heuristic_recursion_pointer(
-        demo_rects, 
-        container_width=20, 
-        model=model, 
-        category="C1", 
-        device="cpu"
-    )
-    print("Resultado demo pointer OPTIMIZADO:")
-    print(f"  - Altura: {altura}")
-    print(f"  - Placements: {placements}")
-    print(f"  - Y_rect: {all_Y_rect}")
-    print("✅ Encoder se calculó UNA SOLA VEZ, decoder se ejecutó en cada decisión")
+# --------------------------------------------------
+# Fin de hr_pointer.py

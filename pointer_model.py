@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 
 class RectEncoder(nn.Module):
-    """Encoder que procesa todos los rectángulos una sola vez (cacheable).
+    """Encoder que procesa todos los rectángulos una sola vez.
     rect_feats: (B, N, F)
     rect_mask: (B, N) boolean True = disponible / válido
     Devuelve: (B, N, d_model)
@@ -25,7 +25,6 @@ class RectEncoder(nn.Module):
 
     def forward(self, rect_feats: torch.Tensor, rect_mask: torch.Tensor | None = None):
         x = self.proj(rect_feats)
-        # En PyTorch, src_key_padding_mask = True indica PAD -> ignorar. Queremos lo contrario de rect_mask (True = válido)
         pad_mask = None
         if rect_mask is not None:
             pad_mask = ~rect_mask  # (B,N)
@@ -57,7 +56,7 @@ class QueryBuilder(nn.Module):
         super().__init__()
         self.ff = nn.Sequential(
             nn.Linear(d_model * 3, d_model),
-            nn.ReLU(),
+            nn.CELU(),
             nn.Linear(d_model, d_model)
         )
 
@@ -88,16 +87,15 @@ class PointerDecoderStep(nn.Module):
 class SPPPointerModel(nn.Module):
     """Modelo pointer optimizado para SPP.
     
-    Cambios vs versión anterior:
     - rect_feat_dim: 10 (features geométricas invariantes)
-    - space_feat_dim: 12 (features geométricas + contexto espacial)
+    - space_feat_dim: 19 (features geométricas + contexto + compatibilidad + minimización altura)
     - global_ctx se actualiza dinámicamente en decode_step
     
     Uso:
       enc_rects, _ = model.encode_rects(rect_feats, rect_mask)  # Una vez
       probs, scores = model.decode_step(enc_rects, rect_mask, space_feat, step_idx)  # Por paso
     """
-    def __init__(self, d_model: int = 256, rect_feat_dim: int = 10, space_feat_dim: int = 12, num_enc_layers: int = 2,
+    def __init__(self, d_model: int = 256, rect_feat_dim: int = 10, space_feat_dim: int = 19, num_enc_layers: int = 2,
                  num_heads: int = 4, d_ff: int = 512, dropout: float = 0.1, max_steps: int = 256):
         super().__init__()
         self.rect_encoder = RectEncoder(d_model, rect_feat_dim, num_enc_layers, num_heads, d_ff, dropout)
@@ -109,7 +107,7 @@ class SPPPointerModel(nn.Module):
 
     @torch.no_grad()
     def encode_rects(self, rect_feats: torch.Tensor, rect_mask: torch.Tensor):
-        """Encoder de rectángulos (se llama UNA VEZ al inicio).
+        """Encoder de rectángulos (se llama una vez al inicio).
         
         Args:
             rect_feats: (B, N, 10) features de todos los rectángulos originales
@@ -117,7 +115,7 @@ class SPPPointerModel(nn.Module):
             
         Returns:
             enc: (B, N, d_model) embeddings de rectángulos
-            global_ctx: (B, d_model) contexto global inicial (puede ignorarse si usas decode_step)
+            global_ctx: (B, d_model) contexto global inicial 
         """
         enc = self.rect_encoder(rect_feats, rect_mask)  # (B,N,d)
         # Contexto global inicial (se recalculará en decode_step)
@@ -130,20 +128,20 @@ class SPPPointerModel(nn.Module):
     @torch.no_grad()
     def decode_step(self, rect_enc: torch.Tensor, rect_mask: torch.Tensor, space_feat: torch.Tensor, step_idx: torch.Tensor,
                     cached_global_ctx: torch.Tensor = None):
-        """Decoder de un paso (se llama en CADA decisión).
+        """Decoder de un paso (se llama en cada decisión).
         
         Args:
             rect_enc: (B, N, d_model) embeddings pre-calculados del encoder
             rect_mask: (B, N) máscara de factibilidad ACTUAL (solo rects disponibles y que caben)
-            space_feat: (B, 12) features del espacio activo
+            space_feat: (B, 19) features del espacio activo
             step_idx: (B,) índice del paso actual
-            cached_global_ctx: (B, d_model) contexto global pre-calculado (OPCIONAL, se recalcula si no se provee)
+            cached_global_ctx: (B, d_model) contexto global pre-calculado 
             
         Returns:
             probs: (B, N) probabilidades de selección
             scores: (B, N) scores raw (antes de softmax)
         """
-        # ACTUALIZACIÓN DINÁMICA de global_ctx basado en rect_mask actual
+        # ACTUALIZACIÓN DINÁMICA de global_ctx 
         mask_f = rect_mask.float()
         denom = mask_f.sum(dim=1, keepdim=True).clamp_min(1.0)
         current_global_ctx = (rect_enc * mask_f.unsqueeze(-1)).sum(dim=1) / denom  # (B,d)
@@ -155,19 +153,3 @@ class SPPPointerModel(nn.Module):
         probs, scores = self.pointer(q, rect_enc, rect_mask)
         return probs, scores
 
-
-def ejemplo_inferencia():
-    """Ejemplo rápido de uso aislado para validar estructura con nuevas dimensiones."""
-    B, N, F_rect, F_space = 1, 5, 10, 12  # ← Nuevas dimensiones
-    rect_feats = torch.rand(B, N, F_rect)
-    rect_mask = torch.ones(B, N, dtype=torch.bool)
-    space_feat = torch.rand(B, F_space)
-    model = SPPPointerModel()
-    rect_enc, _ = model.encode_rects(rect_feats, rect_mask)
-    probs, scores = model.decode_step(rect_enc, rect_mask, space_feat, torch.tensor([0]))
-    print("Probs:", probs)
-    print("✅ Modelo funciona con rect_feat_dim=10, space_feat_dim=12")
-    return probs
-
-if __name__ == "__main__":  # Permite ejecutar standalone
-    ejemplo_inferencia()

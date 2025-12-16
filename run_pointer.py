@@ -13,7 +13,7 @@ import torch
 import hr_algorithm as hr
 
 import categories as cat
-import generator as gen  # Asumiendo ya existe en tu repo
+import generator as gen  
 from pointer_model import SPPPointerModel
 from pointer_training import build_pointer_dataloaders, train_pointer_model
 import hr_pointer as hp
@@ -27,7 +27,6 @@ def main():
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--teacher", choices=["fillratio", "hr", "hr_algo"], default="hr", help="Maestro para generar trayectorias (incluye 'hr_algo' para usar hr_algorithm.hr_packing)")
     parser.add_argument("--visualizar", action="store_true", help="Si se pasa, muestra la visualización del packing del problema de prueba")
     parser.add_argument("--num_visualizaciones", type=int, default=1, help="Cantidad de problemas de prueba a visualizar (solo si --visualizar)")
     args = parser.parse_args()
@@ -44,11 +43,10 @@ def main():
         problemas,
         categoria,
         batch_size=args.batch_size,
-        teacher=args.teacher,
     )
     print(f"Pasos train: {ntr}  val: {nv}")
 
-    model = SPPPointerModel()
+    model = SPPPointerModel(rect_feat_dim=10, space_feat_dim=12)
     history = train_pointer_model(
         model,
         train_loader,

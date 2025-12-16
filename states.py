@@ -62,6 +62,151 @@ def compute_fragmentation(spaces: List[Space], container_area: float) -> float:
     return _norm(small_count, len(spaces)) if len(spaces) > 0 else 0.0
 
 
+def _calcular_fit_quality(rect: Rect, space: Space) -> float:
+    """Calcula qué tan bien encaja un rectángulo en un espacio.
+    
+    Args:
+        rect: (w, h) rectángulo a evaluar
+        space: (x, y, w, h) espacio disponible
+        
+    Returns:
+        float: Score entre 0 (mal fit) y 1 (fit perfecto)
+    """
+    rect_w, rect_h = rect
+    space_x, space_y, space_w, space_h = space
+    
+    if rect_w > space_w or rect_h > space_h:
+        return 0.0
+    
+    # Ratio de área utilizada (más alto = mejor)
+    rect_area = rect_w * rect_h
+    space_area = space_w * space_h
+    area_ratio = rect_area / space_area if space_area > 0 else 0.0
+    
+    # Similitud de aspect ratio (más cercano = mejor)
+    rect_aspect = rect_w / rect_h if rect_h > 0 else 0.0
+    space_aspect = space_w / space_h if space_h > 0 else 0.0
+    aspect_diff = abs(rect_aspect - space_aspect)
+    aspect_similarity = 1.0 / (1.0 + aspect_diff)  # Normalizar entre 0 y 1
+    
+    # Combinar métricas (70% área, 30% forma)
+    fit_score = (area_ratio * 0.7) + (aspect_similarity * 0.3)
+    
+    return fit_score
+
+
+def _calcular_compatibilidad_con_rectangulos(
+    space: Space,
+    remaining_rects: List[Rect],
+    container_width: int,
+    container_height: int,
+    current_max_height: float = 0.0
+) -> List[float]:
+    """Calcula features de compatibilidad entre el espacio y los rectángulos disponibles.
+    
+    Args:
+        space: (x, y, w, h) espacio a evaluar
+        remaining_rects: Lista de rectángulos aún no colocados
+        container_width: Ancho del contenedor
+        container_height: Altura del contenedor
+        current_max_height: Altura máxima actual del packing (para calcular impacto)
+        
+    Returns:
+        List[float]: 8 features de compatibilidad:
+            0. num_compatible_normalized: % de rectángulos que caben
+            1. best_fit_ratio: % del espacio que usa el mejor candidato
+            2. best_waste_normalized: desperdicio normalizado del mejor candidato
+            3. best_aspect_match: similitud de forma con mejor candidato
+            4. best_is_large: si el mejor candidato es grande (>mediana)
+            5. avg_fit_quality: calidad promedio de fit de todos compatibles
+            6. best_height_increase_normalized: cuánto subiría la altura con el mejor 
+            7. best_promotes_horizontal: si el mejor promueve empaque horizontal
+    """
+    space_x, space_y, space_w, space_h = space
+    space_area = space_w * space_h
+    container_area = container_width * container_height
+    
+    if not remaining_rects or space_area == 0:
+        # Sin rectángulos restantes: features por defecto
+        return [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    
+    # Encontrar rectángulos compatibles (que caben)
+    compatible = []
+    fit_scores = []
+    
+    for rect in remaining_rects:
+        rect_w, rect_h = rect
+        if rect_w <= space_w and rect_h <= space_h:
+            compatible.append(rect)
+            fit_score = _calcular_fit_quality(rect, space)
+            fit_scores.append(fit_score)
+    
+    # Si no hay compatibles, retornar features indicando "mal espacio"
+    if not compatible:
+        return [
+            0.0,  # num_compatible_normalized: ninguno cabe
+            0.0,  # best_fit_ratio: no hay candidato
+            1.0,  # best_waste_normalized: máximo desperdicio
+            0.0,  # best_aspect_match: no hay match
+            0.0,  # best_is_large: no hay candidato
+            0.0,  # avg_fit_quality: no hay calidad
+            1.0,  # best_height_increase_normalized: sin candidato, penalizar
+            0.0,  # best_promotes_horizontal: no hay candidato
+        ]
+    
+    # Encontrar el mejor candidato
+    best_idx = fit_scores.index(max(fit_scores))
+    best_rect = compatible[best_idx]
+    best_rect_w, best_rect_h = best_rect
+    best_rect_area = best_rect_w * best_rect_h
+    
+    # Calcular features
+    
+    num_compatible_normalized = len(compatible) / len(remaining_rects)
+    
+    best_fit_ratio = best_rect_area / space_area
+    
+    best_waste = space_area - best_rect_area
+    best_waste_normalized = best_waste / container_area
+    
+    rect_aspect = best_rect_w / best_rect_h if best_rect_h > 0 else 0.0
+    space_aspect = space_w / space_h if space_h > 0 else 0.0
+    aspect_diff = abs(rect_aspect - space_aspect)
+    best_aspect_match = 1.0 / (1.0 + aspect_diff)
+    
+    all_areas = [r[0] * r[1] for r in remaining_rects]
+    median_area = sorted(all_areas)[len(all_areas) // 2]
+    best_is_large = 1.0 if best_rect_area > median_area else 0.0
+    
+    avg_fit_quality = sum(fit_scores) / len(fit_scores)
+    
+    # Si el espacio está arriba de current_max_height, colocar el rect INCREMENTA la altura
+    space_top = space_y + space_h  # Límite superior del espacio
+    new_height_with_best = space_y + best_rect_h  # Nueva altura si colocamos el mejor
+    
+    if new_height_with_best > current_max_height:
+        # Este espacio INCREMENTARÍA la altura
+        height_increase = new_height_with_best - current_max_height
+        best_height_increase_normalized = _norm(height_increase, container_height)
+    else:
+        # Este espacio NO incrementa altura (está en niveles ya ocupados)
+        best_height_increase_normalized = -1.0  # Señal de "no incrementa"
+    
+    # Rectángulos más anchos que altos son mejores para minimizar altura
+    best_promotes_horizontal = 1.0 if best_rect_w > best_rect_h else -1.0
+    
+    return [
+        num_compatible_normalized,
+        best_fit_ratio,
+        best_waste_normalized,
+        best_aspect_match,
+        best_is_large,
+        avg_fit_quality,
+        best_height_increase_normalized,  
+        best_promotes_horizontal,         
+    ]
+
+
 def _rect_features_optimized(rect: Rect, W: int, Href: int, all_rects: List[Rect]) -> List[float]:
     """Features OPTIMIZADAS de rectángulo (10 dimensiones).
     
@@ -83,43 +228,37 @@ def _rect_features_optimized(rect: Rect, W: int, Href: int, all_rects: List[Rect
     w, h = rect
     area = w * h
     
-    # Básicas normalizadas
     h_n = _norm(h, Href)
     w_n = _norm(w, W)
     area_n = _norm(area, W * Href)
     
-    # Geométricas
     aspect_ratio = h / w if w > 0 else 0.0
     perimeter = 2 * (h + w)
     max_perimeter = 2 * (W + Href)
     perimeter_n = _norm(perimeter, max_perimeter)
     
-    # Compactness: qué tan "compacto" es (cuadrado = alto, rect alargado = bajo)
     compactness = area / (w*w + h*h + 1e-6)
     
-    # Es cuadrado? (tolerancia 10%)
     is_square = 1.0 if abs(h - w) / max(h, w) < 0.1 else -1.0
     
-    # Diagonal
     diagonal = math.sqrt(h*h + w*w)
     max_diagonal = math.sqrt(W*W + Href*Href)
     diagonal_n = _norm(diagonal, max_diagonal)
     
-    # Contexto relativo
     area_rank = compute_area_rank(rect, all_rects)
     size_category = compute_size_category(area, W * Href)
     
     return [
-        h_n,           # 0
-        w_n,           # 1
-        area_n,        # 2
-        aspect_ratio,  # 3
-        perimeter_n,   # 4
-        compactness,   # 5
-        is_square,     # 6
-        diagonal_n,    # 7
-        area_rank,     # 8
-        size_category, # 9
+        h_n,           
+        w_n,           
+        area_n,        
+        aspect_ratio,  
+        perimeter_n,   
+        compactness,   
+        is_square,     
+        diagonal_n,    
+        area_rank,     
+        size_category, 
     ]
 
 
@@ -128,14 +267,24 @@ def _space_features_optimized(
     W: int, 
     Href: int, 
     all_spaces: List[Space],
-    current_max_height: float = 0.0
+    current_max_height: float = 0.0,
+    remaining_rects: Optional[List[Rect]] = None
 ) -> List[float]:
-    """Features OPTIMIZADAS de espacio (12 dimensiones).
+    """Features OPTIMIZADAS de espacio (17 dimensiones).
     
-    Características geométricas y contexto espacial (sin features dependientes de rectángulos).
+    Características geométricas, contexto espacial y compatibilidad con rectángulos disponibles.
+    
+    Args:
+        space: (x, y, w, h) espacio a evaluar
+        W: Ancho del contenedor
+        Href: Altura de referencia
+        all_spaces: Lista de todos los espacios (para contexto)
+        current_max_height: Altura máxima actual del packing
+        remaining_rects: Lista de rectángulos aún disponibles (para features de compatibilidad)
     
     Returns:
-        List[float]: Vector de 12 features
+        List[float]: Vector de 19 features
+            BÁSICAS (10):
             0. x_n: posición x normalizada
             1. y_n: posición y normalizada
             2. h_n: altura normalizada
@@ -146,65 +295,85 @@ def _space_features_optimized(
             7. aspect_ratio: h/w del espacio
             8. is_tall: si es más alto que ancho
             9. utilization_potential: potencial de utilización
-            10. num_spaces_n: cantidad de espacios normalizada
-            11. fragmentation: nivel de fragmentación
+            
+            CONTEXTO GLOBAL (1):
+            10. fragmentation: nivel de fragmentación
+            
+            COMPATIBILIDAD CON RECTÁNGULOS (8):
+            11. num_compatible_normalized: % de rectángulos que caben
+            12. best_fit_ratio: % del espacio que usa el mejor candidato
+            13. best_waste_normalized: desperdicio normalizado del mejor
+            14. best_aspect_match: similitud de forma con mejor candidato
+            15. best_is_large: si el mejor candidato es grande
+            16. avg_fit_quality: calidad promedio de fit
+            17. best_height_increase_normalized: incremento de altura 
+            18. best_promotes_horizontal: si promueve empaque horizontal 
     """
     x, y, w, h = space
     area = w * h
     
-    # Básicas normalizadas
+    # ========== FEATURES BÁSICAS (10) ==========
     x_n = _norm(x, W)
     y_n = _norm(y, Href)
     h_n = _norm(h, Href)
     w_n = _norm(w, W)
     area_n = _norm(area, W * Href)
     
-    # Posición estratégica
     bottom_left_score = (1 - x/W) * (1 - y/Href) if W > 0 and Href > 0 else 0.0
     y_relative = y / max(current_max_height, 1.0) if current_max_height > 0 else 0.0
     
-    # Forma del espacio
     aspect_ratio = h / w if w > 0 else 0.0
     is_tall = 1.0 if h > w else -1.0
     
-    # Potencial de utilización
     utilization_potential = area / (W * Href) if (W * Href) > 0 else 0.0
     
-    # Contexto del empaquetamiento
-    num_spaces_n = _norm(len(all_spaces), 20)  # asumiendo max ~20 espacios
+    basic_features = [
+        x_n,                    
+        y_n,                    
+        h_n,                    
+        w_n,                    
+        area_n,                 
+        bottom_left_score,      
+        y_relative,             
+        aspect_ratio,           
+        is_tall,                
+        utilization_potential,  
+    ]
+    
+    # ========== CONTEXTO GLOBAL (1) ==========
     fragmentation = compute_fragmentation(all_spaces, W * Href)
     
-    return [
-        x_n,                    # 0
-        y_n,                    # 1
-        h_n,                    # 2
-        w_n,                    # 3
-        area_n,                 # 4
-        bottom_left_score,      # 5
-        y_relative,             # 6
-        aspect_ratio,           # 7
-        is_tall,                # 8
-        utilization_potential,  # 9
-        num_spaces_n,           # 10
-        fragmentation,          # 11
-    ]
+    # ========== FEATURES DE COMPATIBILIDAD (8) ==========
+    if remaining_rects is not None and len(remaining_rects) > 0:
+        compatibility_features = _calcular_compatibilidad_con_rectangulos(
+            space,
+            remaining_rects,
+            W,
+            Href,
+            current_max_height 
+        )
+    else:
+        # Sin rectángulos: features por defecto (ahora 8)
+        # [num_compatible, best_fit_ratio, best_waste(1.0=máximo), best_aspect, best_is_large, avg_fit, height_increase, promotes_horizontal]
+        compatibility_features = [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    
+    return basic_features + [fragmentation] + compatibility_features
 
 def codificar_estado(
     spaces: List[Space],
     rects: List[Rect],
-    espacio_seleccionado: Space,  # S ACTIVO de este paso
+    espacio_seleccionado: Space, 
     W: int, 
     Href: int,
     include_xy: bool = True,
 ) -> Dict[str, object]:
     """
     Devuelve SOLO tensores de entrada y máscaras (sin y_rect, sin seq_id).
-    NOTA: Esta función se mantiene para compatibilidad con código legacy del transformer anterior.
     Para el modelo pointer, usa pointer_features() directamente.
     
     Returns:
         List con [S_in, R_in] donde:
-        - S_in: lista de vectores de 12 features por espacio
+        - S_in: lista de vectores de 19 features por espacio
         - R_in: lista de vectores de 10 features por rectángulo
     """
     # Calcular current_max_height para space features
@@ -213,7 +382,7 @@ def codificar_estado(
     # Subespacios con nuevas features optimizadas
     S_in = []
     for s in spaces:
-        S_in.append(_space_features_optimized(s, W, Href, spaces, current_max_height))
+        S_in.append(_space_features_optimized(s, W, Href, spaces, current_max_height, remaining_rects=None))
 
     # Rectángulos con nuevas features optimizadas
     R_in = []
@@ -221,7 +390,7 @@ def codificar_estado(
         R_in.append(_rect_features_optimized(r, W, Href, rects))
 
     return [
-        S_in,        # (K, 12)
+        S_in,        # (K, 19)
         R_in         # (N, 10)
     ]
 
@@ -245,15 +414,22 @@ def pointer_features(
         include_xy: Ignorado (mantenido por compatibilidad, siempre incluye xy)
 
     Returns:
-        space_feat: List[float]         -> (12,) features del espacio activo
+        space_feat: List[float]         -> (19,) features del espacio activo
         rect_feats: List[List[float]]   -> (N, 10) features de cada rectángulo
         feasible_mask: List[int]        -> (N,) 1 si cabe en active_space, 0 si no
     """
     # Calcular current_max_height
     current_max_height = max([s[1] + s[3] for s in spaces]) if spaces else 0.0
     
-    # Feature del espacio activo (12 dims)
-    space_feat = _space_features_optimized(active_space, W, Href, spaces, current_max_height)
+    # Feature del espacio activo (19 dims)
+    space_feat = _space_features_optimized(
+        active_space, 
+        W, 
+        Href, 
+        spaces, 
+        current_max_height,
+        remaining_rects=rects 
+    )
     
     # Features de rectángulos (10 dims cada uno)
     rect_feats = []
@@ -274,102 +450,3 @@ def pointer_features(
     
     return space_feat, rect_feats, feasible_mask
 
-
-def agregar_seq_id(samples):
-    """
-    Agrega seq_id al FINAL de cada vector en S_in y R_in, para todos los samples.
-    seq_id = t / (T-1), donde t es el índice del paso, T = len(samples).
-    Si T==1, seq_id=0.0.
-    """
-    T = len(samples)
-    if T <= 1:
-        seq_ids = [0.0] * T
-    else:
-        seq_ids = [t / (T - 1) for t in range(T)]
-
-    for t, sample in enumerate(samples):
-        sid = seq_ids[t]
-
-        # Agregar seq_id al final de cada subespacio
-        # sample["S_in"] tiene forma [S_in] -> (1, K, Fs); por eso iteramos sobre [0]
-        for s in sample["S_in"][0]:
-            s.append(sid)
-
-        # Agregar seq_id al final de cada rectángulo
-        for r in sample["R_in"][0]:
-            r.append(sid)
-
-    return samples
-
-
-def agregar_seq_id_estados(all_states):
-    """
-    all_states: lista de pasos; cada paso es [S_in, R_in]
-      - S_in: lista de vectores (subespacios)
-      - R_in: lista de vectores (rectángulos), puede ser []
-    Agrega/actualiza seq_id al FINAL de cada vector como t/(T-1).
-    Devuelve una nueva lista (no muta la original).
-    """
-    import copy
-
-    T = len(all_states)
-    if T <= 1:
-        seq_ids = [0.0] * T
-    else:
-        seq_ids = [t / (T - 1) for t in range(T)]
-
-    out = copy.deepcopy(all_states)
-
-    # Detectar longitud base de S y R (sin seq_id)
-    base_len_S, base_len_R = None, None
-    for step in out:
-        # S_in
-        if base_len_S is None and step and step[0]:
-            for vec in step[0]:
-                if isinstance(vec, (list, tuple)) and len(vec) > 0:
-                    base_len_S = len(vec)
-                    break
-        # R_in
-        if base_len_R is None and step and len(step) > 1 and step[1]:
-            for vec in step[1]:
-                if isinstance(vec, (list, tuple)) and len(vec) > 0:
-                    base_len_R = len(vec)
-                    break
-        if base_len_S is not None and base_len_R is not None:
-            break
-
-    for t, step in enumerate(out):
-        sid = seq_ids[t]
-
-        # --- S_in ---
-        if step and step[0]:
-            for i, vec in enumerate(step[0]):
-                if base_len_S is None:
-                    # Si no se pudo inferir, intenta append directo
-                    step[0][i] = list(vec) + [sid]
-                else:
-                    L = len(vec)
-                    if L == base_len_S:
-                        step[0][i] = list(vec) + [sid]
-                    elif L == base_len_S + 1:
-                        step[0][i][-1] = sid   # sobrescribe el seq_id existente
-                    else:
-                        # Longitud inesperada: aún así, agrega sid para no fallar
-                        step[0][i] = list(vec) + [sid]
-
-        # --- R_in ---
-        if step and len(step) > 1 and step[1]:
-            for i, vec in enumerate(step[1]):
-                # Si nunca vimos R antes (todos vacíos hasta ahora), definimos base aquí
-                if base_len_R is None:
-                    base_len_R = len(vec)
-
-                L = len(vec)
-                if L == base_len_R:
-                    step[1][i] = list(vec) + [sid]
-                elif L == base_len_R + 1:
-                    step[1][i][-1] = sid
-                else:
-                    step[1][i] = list(vec) + [sid]
-
-    return out

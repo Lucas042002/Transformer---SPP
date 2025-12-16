@@ -1,17 +1,21 @@
-"""Entrenamiento del modelo pointer (SPPPointerModel) mediante Imitation Learning.
+"""Entrenamiento del modelo pointer mediante Imitation Learning.
 
-Proporciona:
- - Generación de trayectorias heurísticas (sin depender de hr_algorithm incompleto)
- - Dataset y collate para candidatos de longitud variable
- - Loop de entrenamiento con máscara de factibilidad
+El modelo aprende a imitar las decisiones del algoritmo HR que
+actúa como "maestro experto". En cada paso de empaquetamiento, el modelo observa:
+  - Features de todos los rectángulos disponibles (10 dims cada uno)
+  - Features del espacio activo actual (19 dims)
+  - Contexto global dinámico (qué rectángulos quedan)
 
-Heurística usada para generar targets (puedes reemplazar luego por HR real):
-  * En cada paso se selecciona el rectángulo factible que maximiza area/(S_w * S_h) (fill ratio)
+Y aprende a predecir qué rectángulo eligió el HR en esa situación.
 
-Pasos futuros posibles:
-  * Reemplazar selección heurística por trayectorias de HR / mejor solución conocida
-  * Añadir acción de rotación explícita (duplicar candidatos) 
-  * Policy gradient / fine-tuning RL sobre altura final
+Arquitectura de aprendizaje:
+  1. Generar trayectorias usando hr_algorithm.hr_packing_pointer (maestro experto)
+     → Devuelve directamente PointerSteps con features optimizados
+  2. Cada PointerStep contiene: (rect_feats, rect_mask, space_feat, target, step_idx)
+  3. Entrenar modelo pointer con cross-entropy sobre las acciones del maestro
+
+Nota: hr_packing_pointer() genera los PointerSteps directamente durante la ejecución
+      del algoritmo HR, sin necesidad de re-simular el proceso.
 """
 from __future__ import annotations
 
@@ -19,6 +23,8 @@ from dataclasses import dataclass
 from typing import List, Tuple, Dict, Literal
 import math
 import random
+import os
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -27,7 +33,8 @@ from torch.utils.data import Dataset, DataLoader
 
 import categories as cat
 import states as st
-import hr_algorithm as hr  # <- para usar hr_packing como maestro real
+import hr_algorithm as hr
+from hr_algorithm import PointerStep 
 from pointer_model import SPPPointerModel
 
 Rect = Tuple[int, int]
@@ -35,306 +42,74 @@ Space = Tuple[int, int, int, int]
 
 
 # --------------------------------------------------
-# Utilidades geométricas básicas
+# Generación de trayectorias desde HR Algorithm
 # --------------------------------------------------
-def rect_fits_in_space(rect: Rect, space: Space):
-    rw, rh = rect
-    _, _, w, h = space
-    if rw <= w and rh <= h:
-        return True, 0
-    if rh <= w and rw <= h:
-        return True, 1
-    return False, -1
-
-
-def place_rect(space: Space, rect: Rect):
-    fits, rot = rect_fits_in_space(rect, space)
-    if not fits:
-        return False, (-1, -1), rect, rot
-    rw, rh = rect
-    if rot == 1:
-        rw, rh = rh, rw
-    x, y, w, h = space
-    return True, (x, y), (rw, rh), rot
-
-
-def divide_space(space: Space, placed_size: Rect, pos):
-    x, y, w, h = space
-    rw, rh = placed_size
-    rx, ry = pos
-    S1 = (x, ry + rh, w, (y + h) - (ry + rh))
-    S2 = (rx + rw, y, (x + w) - (rx + rw), rh)
-    return S1, S2
-
-
-def limpiar_spaces(spaces: List[Space]):
-    return [s for s in spaces if s[2] > 0 and s[3] > 0]
-
-
-# --------------------------------------------------
-# Generación de trayectorias (maestros: fillratio | hr)
-# --------------------------------------------------
-@dataclass
-class PointerStep:
-    rect_feats: torch.Tensor  # (N, F)
-    rect_mask: torch.Tensor   # (N,) bool (factibles)
-    space_feat: torch.Tensor  # (F_space,)
-    target: int               # índice elegido (0..N-1) solo entre factibles
-    step_idx: int
-
-
-def build_pointer_trajectory_fillratio(rects: List[Rect], container_width: int, category: str) -> List[PointerStep]:
-    Href = cat.CATEGORIES[category]["height"]
-    max_height_virtual = Href * 5
-    spaces: List[Space] = [(0, 0, container_width, max_height_virtual)]
-    remaining = rects.copy()
-    steps: List[PointerStep] = []
-    step = 0
-
-    while remaining:
-        active_space = spaces[-1]
-        # Features de espacio
-        space_feat_vec = st._space_features_sin_seqid(active_space, container_width, Href, include_xy=True, S_active=active_space)
-
-        rect_feats_list = []
-        feasible_mask = []
-        fill_ratios = []
-        Sw, Sh = active_space[2], active_space[3]
-        S_area = Sw * Sh if Sw > 0 and Sh > 0 else 1.0
-
-        for r in remaining:
-            feats = st._rect_features_sin_seqid(r, active_space, container_width, Href)
-            rect_feats_list.append(feats)
-            feasible = (feats[5] > 0.5) or (feats[6] > 0.5)
-            feasible_mask.append(1 if feasible else 0)
-            if feasible:
-                area = r[0]*r[1]
-                fill_ratios.append(area / S_area)
-            else:
-                fill_ratios.append(-1.0)
-
-        if not any(feasible_mask):
-            # descartar espacio y continuar
-            spaces.pop()
-            if not spaces:
-                break
-            continue
-
-        # Selección heurística: mayor fill ratio
-        target_idx = max(range(len(remaining)), key=lambda i: fill_ratios[i])
-
-        step_obj = PointerStep(
-            rect_feats=torch.tensor(rect_feats_list, dtype=torch.float32),
-            rect_mask=torch.tensor(feasible_mask, dtype=torch.bool),
-            space_feat=torch.tensor(space_feat_vec, dtype=torch.float32),
-            target=target_idx,
-            step_idx=step,
-        )
-        steps.append(step_obj)
-
-        # Efectuar colocación
-        chosen_rect = remaining[target_idx]
-        ok, pos, placed_size, rot = place_rect(active_space, chosen_rect)
-        if ok:
-            S1, S2 = divide_space(active_space, placed_size, pos)
-            spaces.pop()
-            spaces.extend([S1, S2])
-            spaces = limpiar_spaces(spaces)
-            remaining.pop(target_idx)
-        else:
-            # seguridad: si falla remove rect para no ciclo infinito
-            remaining.pop(target_idx)
-        step += 1
-
-    return steps
-
-
-def build_pointer_trajectory_hr(rects: List[Rect], container_width: int, category: str) -> List[PointerStep]:
-    """Genera trayectoria usando una variante simple del HR como maestro:
-    - Ordena rectángulos restantes por área (desc) cada paso (estrategia greedy)
-    - Recorre espacios actuales en orden de aparición para encontrar el primero que acepta algún rect
-    - El rect elegido es el primero que cabe (sin volver a rotar lista base)
-    El target se refiere al índice del rectángulo elegido dentro de la LISTA ORIGINAL remaining (no reordenada) para que coincida con rect_feats.
-    """
-    Href = cat.CATEGORIES[category]["height"]
-    max_height_virtual = Href * 5
-    spaces: List[Space] = [(0, 0, container_width, max_height_virtual)]
-    remaining = rects.copy()
-    steps: List[PointerStep] = []
-    step = 0
-
-    while remaining:
-        # Elegir un espacio que permita colocar al menos un rectángulo (siguiendo orden)
-        active_space = None
-        for sp in spaces:
-            # comprobar factibilidad rápida
-            if any(rect_fits_in_space(r, sp)[0] for r in remaining):
-                active_space = sp
-                break
-        if active_space is None:
-            # No cabe nada en ningún espacio -> terminar
-            break
-
-        # Lista auxiliar ordenada por área para decidir maestro
-        ordered = sorted(enumerate(remaining), key=lambda x: x[1][0] * x[1][1], reverse=True)
-        chosen_orig_index = None
-        for original_idx, r in ordered:
-            fits, _ = rect_fits_in_space(r, active_space)
-            if fits:
-                chosen_orig_index = original_idx
-                break
-        if chosen_orig_index is None:
-            # Ninguno cabe realmente (inconsistencia) -> eliminar espacio y continuar
-            spaces.remove(active_space)
-            if not spaces:
-                break
-            continue
-
-        # Construir features RELATIVOS al active_space usando el orden actual de remaining
-        space_feat_vec = st._space_features_sin_seqid(active_space, container_width, Href, include_xy=True, S_active=active_space)
-        rect_feats_list = []
-        feasible_mask = []
-        for r in remaining:
-            feats = st._rect_features_sin_seqid(r, active_space, container_width, Href)
-            rect_feats_list.append(feats)
-            feasible = (feats[5] > 0.5) or (feats[6] > 0.5)
-            feasible_mask.append(1 if feasible else 0)
-
-        step_obj = PointerStep(
-            rect_feats=torch.tensor(rect_feats_list, dtype=torch.float32),
-            rect_mask=torch.tensor(feasible_mask, dtype=torch.bool),
-            space_feat=torch.tensor(space_feat_vec, dtype=torch.float32),
-            target=chosen_orig_index,
-            step_idx=step,
-        )
-        steps.append(step_obj)
-
-        # Colocar el rect (usar chosen_orig_index) y dividir espacio
-        chosen_rect = remaining[chosen_orig_index]
-        ok, pos, placed_size, rot = place_rect(active_space, chosen_rect)
-        if ok:
-            S1, S2 = divide_space(active_space, placed_size, pos)
-            # Sustituir espacio usado por sus divisiones (similar a estrategia simple)
-            sp_idx = spaces.index(active_space)
-            spaces.pop(sp_idx)
-            spaces.extend([S1, S2])
-            spaces = limpiar_spaces(spaces)
-            remaining.pop(chosen_orig_index)
-        else:
-            # Falla inesperada: remover rect para no ciclar
-            remaining.pop(chosen_orig_index)
-        step += 1
-
-    return steps
-
-
-def build_pointer_trajectory_from_hr_algorithm(rects: List[Rect], container_width: int, category: str) -> List[PointerStep]:
-    """Construye una trayectoria de PointerSteps usando directamente el algoritmo HR actual.
-    
-    NOTA: Esta función re-calcula features con el nuevo formato optimizado (10 dims rect, 12 dims space)
-    en lugar de usar los estados generados por hr_algorithm directamente.
-    
-    Args:
-        rects: Lista de rectángulos a empaquetar
-        container_width: Ancho del contenedor
-        category: Categoría del problema
-        
-    Returns:
-        Lista de PointerStep con features optimizados
-    """
-    steps: List[PointerStep] = []
-    Href = cat.CATEGORIES[category]["height"]
-    
-    # Ejecutar HR para obtener decisiones (ignoramos estados antiguos)
-    rects_copy = rects.copy()
-    spaces_init = [(0, 0, container_width, 1000)]
-    placed, estados, Y_rect = hr.hr_packing(spaces=spaces_init, rects=rects_copy, category=category)
-
-    if not placed or not Y_rect:
-        return steps
-
-    # Simulamos el proceso de packing para recrear features optimizados
-    current_rects = rects.copy()
-    current_spaces = spaces_init.copy()
-    
-    for step_idx, (target_1b, (rect_placed, pos)) in enumerate(zip(Y_rect, placed)):
-        if target_1b <= 0 or not current_rects:
-            continue
-            
-        target = target_1b - 1
-        if target >= len(current_rects):
-            continue
-        
-        # Determinar espacio activo (simplificación: último espacio que acepta el rect)
-        active_space = current_spaces[-1] if current_spaces else (0, 0, container_width, 1000)
-        
-        # Calcular features OPTIMIZADOS (10 dims rect, 12 dims space)
-        current_max_height = max([s[1] + s[3] for s in current_spaces]) if current_spaces else 1000
-        
-        # Space features (12 dims)
-        space_feat_vec = st._space_features_optimized(
-            active_space, container_width, Href, current_spaces, current_max_height
-        )
-        
-        # Rect features (10 dims cada uno)
-        rect_feats_list = []
-        feasible_mask_list = []
-        for r in current_rects:
-            feats = st._rect_features_optimized(r, container_width, Href, current_rects)
-            rect_feats_list.append(feats)
-            
-            # Calcular factibilidad
-            rw, rh = r
-            _, _, sw, sh = active_space
-            fits_normal = (rw <= sw and rh <= sh)
-            fits_rotated = (rh <= sw and rw <= sh)
-            feasible = fits_normal or fits_rotated
-            feasible_mask_list.append(1 if feasible else 0)
-        
-        # Validar target
-        if feasible_mask_list[target] == 0:
-            continue  # Target no factible, ignorar
-        
-        # Crear PointerStep
-        steps.append(PointerStep(
-            rect_feats=torch.tensor(rect_feats_list, dtype=torch.float32),
-            rect_mask=torch.tensor(feasible_mask_list, dtype=torch.bool),
-            space_feat=torch.tensor(space_feat_vec, dtype=torch.float32),
-            target=target,
-            step_idx=step_idx,
-        ))
-        
-        # Actualizar estado simulado (remover rect colocado)
-        current_rects.pop(target)
-        # Actualizar espacios (simplificación: usar placed para inferir divisiones)
-        # Esto es aproximado; en producción podrías replicar la lógica exacta de hr_packing
-
-    return steps
-
-
 def build_dataset_from_problems(
     problems: List[List[Rect]],
     category: str,
-    teacher: Literal["fillratio", "hr", "hr_algo"] = "fillratio",
+    augment_permutations: int = 0
 ) -> List[PointerStep]:
-    """Concatena trayectorias en una lista (plano) según maestro seleccionado.
-
-    teacher opciones:
-      - "fillratio": heurística de razón área/espacio
-      - "hr": variante simple HR implementada localmente (orden por área + primer ajuste)
-      - "hr_algo": usa directamente hr_algorithm.hr_packing para generar (estados, Y)
+    """Genera dataset de entrenamiento con data augmentation opcional.
+    
+    Usa hr_algorithm.hr_packing_pointer() que ejecuta el HR y devuelve directamente
+    los PointerSteps con features optimizados (10 dims rect, 19 dims space).
+    
+    Args:
+        problems: Lista de problemas, donde cada problema es una lista de rectángulos
+        category: Categoría del problema (determina W y Href)
+        augment_permutations: Número de permutaciones aleatorias adicionales por problema (default: 0)
+                             Si es 0, solo usa el orden óptimo del HR
+                             Si es >0, genera N versiones con orden aleatorio adicional
+        
+    Returns:
+        Lista plana de PointerStep (todos los pasos de todos los problemas concatenados)
+        Con augmentation: total_steps = len(problems) * (1 + augment_permutations) * steps_per_problem
     """
     out: List[PointerStep] = []
     W = cat.CATEGORIES[category]["width"]
-    for rects in problems:
-        if teacher == "fillratio":
-            out.extend(build_pointer_trajectory_fillratio(rects, W, category))
-        elif teacher == "hr":
-            out.extend(build_pointer_trajectory_hr(rects, W, category))
-        elif teacher == "hr_algo":
-            out.extend(build_pointer_trajectory_from_hr_algorithm(rects, W, category))
-        else:
-            raise ValueError(f"Teacher desconocido: {teacher}")
+    
+    for idx, rects in enumerate(problems):
+        # VERSIÓN ORIGINAL: Orden óptimo del HR (con permutaciones internas)
+        pointer_steps, placements, altura, rect_sequence, Y_rect = hr.heuristic_recursion_pointer(
+            rects=rects,
+            container_width=W,
+            category=category
+        )
+        
+        out.extend(pointer_steps)
+        
+        if len(pointer_steps) != cat.CATEGORIES[category]["num_items"]:
+            print(f"  Problema {idx+1}: Se esperaban {cat.CATEGORIES[category]['num_items']} pasos, pero se generaron {len(pointer_steps)}")
+        
+        # DATA AUGMENTATION: Versiones con órdenes aleatorios
+        if augment_permutations > 0:
+            for aug_idx in range(augment_permutations):
+                # Permutar aleatoriamente los rectángulos
+                rects_shuffled = rects.copy()
+                random.shuffle(rects_shuffled)
+                
+                # Generar trayectoria con este orden aleatorio
+                pointer_steps_aug, _, _, _, _ = hr.heuristic_recursion_pointer(
+                    rects=rects_shuffled,
+                    container_width=W,
+                    category=category
+                )
+                
+                out.extend(pointer_steps_aug)
+    
+    total_problemas = len(problems)
+    problemas_originales = total_problemas
+    problemas_augmentados = total_problemas * augment_permutations
+    
+    if augment_permutations > 0:
+        print(f"\nDataset con Data Augmentation:")
+        print(f"  Problemas originales: {problemas_originales}")
+        print(f"  Problemas augmentados: {problemas_augmentados} ({augment_permutations} permutaciones x {total_problemas})")
+        print(f"  Total problemas: {problemas_originales + problemas_augmentados}")
+        print(f"  Total pasos: {len(out)}")
+    else:
+        print(f"\nDataset completo: {len(out)} pasos de {len(problems)} problemas")
+    
     return out
 
 
@@ -397,11 +172,27 @@ def train_pointer_model(
     weight_decay: float = 1e-4,
     device: str = "cpu",
     grad_clip: float = 1.0,
+    categoria: str = "C1",
+    guardar_modelo: bool = True,
+    num_enc_layers: int = None,
+    num_heads: int = None,
+    early_stopping_patience: int = 10,
+    use_weighted_loss: bool = True, 
 ):
     model.to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     best_val_acc = -1.0
+    epochs_without_improvement = 0
+    best_epoch = 0
     history = {"train_loss": [], "train_acc": [], "val_acc": []}
+    
+    # Crear pesos para pasos (pasos finales pesan más)
+    max_steps = cat.CATEGORIES[categoria]["num_items"]
+    if use_weighted_loss:
+        step_weights = torch.linspace(1.0, 2.0, steps=max_steps, device=device)
+        print(f"Usando weighted loss: pasos iniciales (peso=1.0), pasos finales (peso=2.0)")
+    else:
+        step_weights = None
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -416,18 +207,34 @@ def train_pointer_model(
             targets = batch["targets"].to(device)        # (B,)
 
             opt.zero_grad(set_to_none=True)
-            # Encode
-            rect_enc, global_ctx = model.encode_rects(rect_feats, rect_mask)
-            # Query
+            
+            # Encode rectángulos (una vez)
+            rect_enc, _ = model.encode_rects(rect_feats, rect_mask)
+            
+            # Recalcular global_ctx DINÁMICAMENTE 
+            mask_f = rect_mask.float()
+            denom = mask_f.sum(dim=1, keepdim=True).clamp_min(1.0)
+            current_global_ctx = (rect_enc * mask_f.unsqueeze(-1)).sum(dim=1) / denom  # (B,d)
+            current_global_ctx = model.global_linear(current_global_ctx)
+            
+            # Query builder con global_ctx DINÁMICO
             space_emb = model.space_encoder(space_feat)
             step_emb = model.step_emb(step_idx)
-            q = model.query_builder(space_emb, global_ctx, step_emb)  # (B,d)
+            q = model.query_builder(space_emb, current_global_ctx, step_emb)  # (B,d)
+            
             # Pointer scores
             q_exp = q.unsqueeze(1)  # (B,1,d)
             scores = torch.matmul(q_exp, rect_enc.transpose(1, 2)).squeeze(1) / math.sqrt(q.shape[-1])  # (B,N)
             scores = scores.masked_fill(~rect_mask, -1e9)
 
-            loss = F.cross_entropy(scores, targets)
+            # Loss con pesos opcionales
+            if step_weights is not None:
+                # Aplicar pesos por paso
+                loss = F.cross_entropy(scores, targets, reduction='none')
+                weights = step_weights[step_idx]  # (B,)
+                loss = (loss * weights).mean()
+            else:
+                loss = F.cross_entropy(scores, targets)
             loss.backward()
             if grad_clip:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -449,10 +256,33 @@ def train_pointer_model(
             history["val_acc"].append(val_acc)
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
+                best_epoch = epoch
+                epochs_without_improvement = 0
+                print(f"[Epoch {epoch:02d}] loss={train_loss:.4f} train_acc={train_acc:.3f} val_acc={val_acc:.3f} NEW BEST!")
+            else:
+                epochs_without_improvement += 1
+                print(f"[Epoch {epoch:02d}] loss={train_loss:.4f} train_acc={train_acc:.3f} val_acc={val_acc:.3f} (no improvement: {epochs_without_improvement}/{early_stopping_patience})")
+                
+                # Early stopping check
+                if epochs_without_improvement >= early_stopping_patience:
+                    print(f"\nEARLY STOPPING: No mejora en {early_stopping_patience} épocas consecutivas")
+                    print(f"   Mejor accuracy: {best_val_acc:.4f} en época {best_epoch}")
+                    break
         else:
             val_acc = float('nan')
+            print(f"[Epoch {epoch:02d}] loss={train_loss:.4f} train_acc={train_acc:.3f} val_acc={val_acc:.3f}")
 
-        print(f"[Epoch {epoch:02d}] loss={train_loss:.4f} train_acc={train_acc:.3f} val_acc={val_acc:.3f}")
+    # Guardar modelo y generar visualización
+    if guardar_modelo:
+        guardar_modelo_pointer(model, opt, history, epochs, categoria, num_enc_layers, num_heads)
+        guardar_imagen_entrenamiento_pointer(
+            history["train_loss"], 
+            history["train_acc"], 
+            history["val_acc"], 
+            categoria,
+            num_enc_layers,
+            num_heads
+        )
 
     return history
 
@@ -469,10 +299,20 @@ def evaluate_pointer_model(model: SPPPointerModel, loader: DataLoader, device: s
         step_idx = batch["step_idx"].to(device)
         targets = batch["targets"].to(device)
 
-        rect_enc, global_ctx = model.encode_rects(rect_feats, rect_mask)
+        # Encode rectángulos
+        rect_enc, _ = model.encode_rects(rect_feats, rect_mask)
+        
+        # Recalcular global_ctx DINÁMICAMENTE basado en rect_mask actual
+        mask_f = rect_mask.float()
+        denom = mask_f.sum(dim=1, keepdim=True).clamp_min(1.0)
+        current_global_ctx = (rect_enc * mask_f.unsqueeze(-1)).sum(dim=1) / denom
+        current_global_ctx = model.global_linear(current_global_ctx)
+        
+        # Query builder con global_ctx DINÁMICO
         space_emb = model.space_encoder(space_feat)
         step_emb = model.step_emb(step_idx)
-        q = model.query_builder(space_emb, global_ctx, step_emb)
+        q = model.query_builder(space_emb, current_global_ctx, step_emb)
+        
         q_exp = q.unsqueeze(1)
         scores = torch.matmul(q_exp, rect_enc.transpose(1, 2)).squeeze(1) / math.sqrt(q.shape[-1])
         scores = scores.masked_fill(~rect_mask, -1e9)
@@ -480,6 +320,137 @@ def evaluate_pointer_model(model: SPPPointerModel, loader: DataLoader, device: s
         correct += (preds == targets).sum().item()
         total += targets.numel()
     return correct / max(total, 1)
+
+
+# --------------------------------------------------
+# Funciones de visualización y guardado
+# --------------------------------------------------
+def guardar_imagen_entrenamiento_pointer(train_losses, train_accs, val_accs, categoria, 
+                                         num_enc_layers=None, num_heads=None):
+    """
+    Guarda una imagen con las curvas de entrenamiento del modelo pointer
+    
+    Args:
+        train_losses: Lista de pérdidas de entrenamiento por época
+        train_accs: Lista de accuracies de entrenamiento por época
+        val_accs: Lista de accuracies de validación por época
+        categoria: Categoría del problema (e.g., "C1")
+        num_enc_layers: Número de capas del encoder (opcional)
+        num_heads: Número de attention heads (opcional)
+    """
+    # Crear carpeta img si no existe
+    os.makedirs("img", exist_ok=True)
+    
+    # Calcular accuracy máxima
+    max_val_acc = max(val_accs) if val_accs else 0.0
+    max_train_acc = max(train_accs) if train_accs else 0.0
+    
+    # Crear la figura con 3 subplots
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 5))
+    
+    # Gráfico de pérdida
+    ax1.plot(train_losses, 'b-', label='Training Loss', linewidth=2)
+    ax1.set_title(f'Training Loss - Pointer {categoria}', fontsize=14, fontweight='bold')
+    ax1.set_xlabel('Epoch', fontsize=12)
+    ax1.set_ylabel('Loss', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+    
+    # Gráfico de train accuracy
+    ax2.plot(train_accs, 'g-', label='Training Accuracy', linewidth=2)
+    ax2.set_title(f'Training Accuracy - Pointer {categoria}', fontsize=14, fontweight='bold')
+    ax2.set_xlabel('Epoch', fontsize=12)
+    ax2.set_ylabel('Accuracy', fontsize=12)
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+    ax2.set_ylim([0, 1])
+    
+    # Gráfico de validation accuracy
+    ax3.plot(val_accs, 'r-', label='Validation Accuracy', linewidth=2)
+    ax3.set_title(f'Validation Accuracy - Pointer {categoria}', fontsize=14, fontweight='bold')
+    ax3.set_xlabel('Epoch', fontsize=12)
+    ax3.set_ylabel('Accuracy', fontsize=12)
+    ax3.grid(True, alpha=0.3)
+    ax3.legend()
+    ax3.set_ylim([0, 1])
+    
+    # Añadir información adicional
+    final_loss = train_losses[-1] if train_losses else 0
+    
+    # Construir título con hiperparámetros si están disponibles
+    hyperparams_str = ""
+    if num_enc_layers is not None and num_heads is not None:
+        hyperparams_str = f' | Layers: {num_enc_layers} | Heads: {num_heads}'
+    
+    fig.suptitle(f'Pointer Model Training Results - {categoria}{hyperparams_str}\n'
+                f'Final Loss: {final_loss:.4f} | Train Acc: {max_train_acc:.4f} | Val Acc: {max_val_acc:.4f}', 
+                fontsize=16, fontweight='bold')
+    
+    plt.tight_layout()
+    
+    # Nombre con accuracy y hiperparámetros
+    accuracy_str = f"{max_val_acc:.4f}".replace("0.", "")  # 0.8745 -> 8745
+    
+    # Construir nombre con hiperparámetros
+    hyperparams_suffix = ""
+    if num_enc_layers is not None and num_heads is not None:
+        hyperparams_suffix = f"_L{num_enc_layers}_H{num_heads}"
+    
+    image_filename = f"img/pointer_{categoria.lower()}{hyperparams_suffix}_acc{accuracy_str}.png"
+    
+    plt.savefig(image_filename, dpi=300, bbox_inches='tight', 
+                facecolor='white', edgecolor='none')
+    plt.close()
+    
+    print(f"\nImagen de entrenamiento guardada en: {image_filename}")
+
+
+def guardar_modelo_pointer(model, optimizer, history, epochs, categoria,
+                           num_enc_layers=None, num_heads=None):
+    """
+    Guarda el modelo pointer entrenado con accuracy máxima e hiperparámetros en el nombre
+    
+    Args:
+        model: Modelo SPPPointerModel entrenado
+        optimizer: Optimizador usado
+        history: Diccionario con métricas de entrenamiento
+        epochs: Número de épocas entrenadas
+        categoria: Categoría del problema (e.g., "C1")
+        num_enc_layers: Número de capas del encoder 
+        num_heads: Número de attention heads 
+    """
+    # Crear carpeta models si no existe
+    os.makedirs("models", exist_ok=True)
+    
+    # Calcular accuracy máxima de validación
+    max_val_acc = max(history['val_acc']) if history['val_acc'] else 0.0
+    
+    # Nombre del archivo con accuracy y hiperparámetros
+    accuracy_str = f"{max_val_acc:.4f}".replace("0.", "")  # 0.8745 -> 8745
+    
+    # Construir nombre con hiperparámetros
+    hyperparams_suffix = ""
+    if num_enc_layers is not None and num_heads is not None:
+        hyperparams_suffix = f"_L{num_enc_layers}_H{num_heads}"
+    
+    model_filename = f"models/pointer_{categoria.lower()}{hyperparams_suffix}_acc{accuracy_str}.pth"
+    
+    # Guardar el modelo completo con hiperparámetros
+    torch.save({
+        'epoch': epochs,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'history': history,
+        'max_val_acc': max_val_acc,
+        'categoria': categoria,
+        'num_enc_layers': num_enc_layers,
+        'num_heads': num_heads,
+    }, model_filename)
+    
+    print(f"Modelo guardado en: {model_filename}")
+    print(f"Accuracy máxima de validación: {max_val_acc:.4f}")
+    if num_enc_layers is not None and num_heads is not None:
+        print(f"Hiperparámetros: {num_enc_layers} layers, {num_heads} heads")
 
 
 # --------------------------------------------------
@@ -492,37 +463,92 @@ def build_pointer_dataloaders(
     val_split: float = 0.1,
     shuffle: bool = True,
     seed: int = 42,
-    teacher: Literal["fillratio", "hr", "hr_algo"] = "fillratio",
+    augment_permutations: int = 0,
 ):
-    steps = build_dataset_from_problems(problems, category, teacher=teacher)
+    """Construye dataloaders de entrenamiento y validación con data augmentation opcional.
+    
+    Args:
+        problems: Lista de problemas (cada uno es una lista de rectángulos)
+        category: Categoría del problema
+        batch_size: Tamaño de batch
+        val_split: Fracción de datos para validación
+        shuffle: Si mezclar los datos antes de split
+        seed: Semilla para reproducibilidad
+        augment_permutations: Número de permutaciones aleatorias adicionales por problema (default: 0)
+        
+    Returns:
+        train_loader, val_loader, num_train_steps, num_val_steps
+    """
+    print(f"\n{'='*80}")
+    print(f"CONSTRUYENDO DATALOADERS")
+    print(f"{'='*80}")
+    print(f"Categoría: {category}")
+    print(f"Problemas: {len(problems)}")
+    print(f"Batch size: {batch_size}")
+    print(f"Val split: {val_split}")
+    if augment_permutations > 0:
+        print(f"Data Augmentation: {augment_permutations} permutaciones adicionales por problema")
+    
+    # Generar todos los pasos de todos los problemas (con augmentation si está activo)
+    steps = build_dataset_from_problems(problems, category, augment_permutations)
     if not steps:
         raise ValueError("No se generaron pasos para el dataset pointer.")
-    # Split
-    indices = list(range(len(steps)))
+    
+    print(f"\nESTADÍSTICAS DEL DATASET:")
+    print(f"  Total de pasos: {len(steps)}")
+    
+    # IMPORTANTE: Con augmentation, cada problema genera (1 + augment_permutations) variantes
+    # Por ejemplo: 500 problemas con augment_permutations=2 → 1500 variantes totales
+    total_problem_variants = len(problems) * (1 + augment_permutations)
+    steps_per_variant = cat.CATEGORIES[category]["num_items"]
+    
+    print(f"  Problemas originales: {len(problems)}")
+    print(f"  Variantes totales: {total_problem_variants} (incluye augmentation)")
+    print(f"  Pasos por variante: {steps_per_variant}")
+    
+    # Split train/val a nivel de PROBLEMAS ORIGINALES (no variantes)
+    # Esto asegura que todas las variantes augmentadas de un problema estén juntas
+    problem_indices = list(range(len(problems)))
     if shuffle:
-        random.Random(seed).shuffle(indices)
-    val_count = int(len(indices) * val_split)
-    val_idx = set(indices[:val_count])
-    train_steps = [steps[i] for i in indices if i not in val_idx]
-    val_steps = [steps[i] for i in indices if i in val_idx]
+        random.Random(seed).shuffle(problem_indices)
+    
+    val_problem_count = max(1, int(len(problems) * val_split))
+    val_problem_idx = set(problem_indices[:val_problem_count])
+    
+    print(f"\nSPLIT TRAIN/VAL:")
+    print(f"  Problemas de validación: {val_problem_count}/{len(problems)}")
+    
+    # Asignar pasos a train o val según su problema de origen
+    train_steps = []
+    val_steps = []
+    
+    step_idx = 0
+    for prob_idx in range(len(problems)):
+        # Cada problema genera steps_per_variant pasos × (1 + augment_permutations) variantes
+        num_steps_for_problem = steps_per_variant * (1 + augment_permutations)
+        problem_steps = steps[step_idx:step_idx + num_steps_for_problem]
+        
+        if prob_idx in val_problem_idx:
+            val_steps.extend(problem_steps)
+        else:
+            train_steps.extend(problem_steps)
+        
+        step_idx += num_steps_for_problem
+    
+    print(f"  Pasos de entrenamiento: {len(train_steps)}")
+    print(f"  Pasos de validación: {len(val_steps)}")
 
     train_ds = PointerStepsDataset(train_steps)
     val_ds = PointerStepsDataset(val_steps)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=pointer_collate)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=pointer_collate)
+    
+    print(f"\nDataloaders creados:")
+    print(f"  Train batches: {len(train_loader)}")
+    print(f"  Val batches: {len(val_loader)}")
+    print(f"{'='*80}\n")
+    
     return train_loader, val_loader, len(train_steps), len(val_steps)
 
 
-if __name__ == "__main__":
-    # Pequeño smoke test (usa problemas sintéticos simples)
-    synthetic = [
-        [(3,5),(4,4),(2,7),(5,2)],
-        [(2,2),(3,3),(4,1),(1,4)],
-        [(6,2),(2,6),(3,3),(1,5)],
-    ]
-    train_loader, val_loader, ntr, nv = build_pointer_dataloaders(synthetic, "C1", batch_size=4)
-    print(f"Train steps: {ntr}  Val steps: {nv}")
-    model = SPPPointerModel()
-    history = train_pointer_model(model, train_loader, val_loader, epochs=2)
-    print("History keys:", history.keys())
