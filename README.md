@@ -123,8 +123,6 @@ Transformer---SPP/
 │   └── run_pointer.py            # Script rápido de prueba
 │
 ├── Visualización y Documentación
-│   ├── GUIA_TESTING.md           # Guía completa de testing
-│   ├── VISUALIZACION_TESTING.md  # Documentación de visualización
 │   └── README.md                 # Este archivo
 │
 ├── Datos y Configuración
