@@ -1,4 +1,4 @@
-# Transformer + SPP 🎯
+# Transformer + SPP 
 
 **Solución híbrida del Strip Packing Problem usando Transformers y Aprendizaje por Imitación**
 
@@ -8,7 +8,7 @@
 
 ---
 
-## 📋 Tabla de Contenidos
+##  Tabla de Contenidos
 
 - [Contexto](#contexto)
 - [Instalación](#instalación)
@@ -22,25 +22,25 @@
 
 ---
 
-## 🎯 Contexto
+##  Contexto
 
 Este proyecto aborda el **Strip Packing Problem (SPP)**, un problema NP-hard de optimización combinatoria que consiste en empaquetar rectángulos de diferentes dimensiones en un contenedor de ancho fijo minimizando la altura total.
 
 **Características del problema:**
-- ✅ Rotaciones de 90° permitidas
-- ✅ División de espacios tipo guillotina
-- ✅ Sin solapamiento entre rectángulos
-- ✅ Benchmarks clásicos de Hopper & Turton (1999)
+- Rotaciones de 90° permitidas
+- División de espacios tipo guillotina
+- Sin solapamiento entre rectángulos
+- Benchmarks clásicos de Hopper & Turton (1999)
 
 **Solución propuesta:**
-- 🧠 **Modelo Pointer Network** basado en Transformer que aprende del algoritmo heurístico HR
-- ⚡ **8.5× más rápido** que HR manteniendo calidad competitiva (Gap 24.59%)
-- 🎓 **Imitation Learning** supervisado con data augmentation
-- 🔄 **Arquitectura híbrida** que combina aprendizaje profundo con heurísticas clásicas
+- **Modelo Pointer Network** basado en Transformer que aprende del algoritmo heurístico HR
+- **8.5× más rápido** que HR manteniendo calidad competitiva (Gap 24.59%)
+- **Imitation Learning** supervisado con data augmentation
+- **Arquitectura híbrida** que combina aprendizaje profundo con heurísticas clásicas
 
 ---
 
-## 🚀 Instalación
+## Instalación
 
 ### **Requisitos del Sistema**
 - Python 3.10 o superior
@@ -104,44 +104,44 @@ python -c "import torch; print(f'PyTorch {torch.__version__}'); print(f'CUDA dis
 
 ---
 
-## 📁 Estructura del Proyecto
+## Estructura del Proyecto
 
 ```
 Transformer---SPP/
 │
-├── 🧠 Core - Algoritmos y Modelos
+├── Core - Algoritmos y Modelos
 │   ├── hr_algorithm.py           # Algoritmo Heurístico Recursivo (HR) + generación de datos
 │   ├── hr_pointer.py             # Versión híbrida HR + Pointer Model
 │   ├── pointer_model.py          # Arquitectura Transformer (Encoder-Decoder)
 │   ├── pointer_training.py       # Pipeline de entrenamiento (Imitation Learning)
 │   └── main.py                   # Script principal (entrenar/testear/visualizar)
 │
-├── 🧪 Testing y Análisis
+├── Testing y Análisis
 │   ├── test_pointer.py           # Suite de testing con comparaciones
 │   ├── analisis_complejidad.py   # Análisis de complejidad temporal/espacial
 │   ├── greedy_algorithms.py      # Algoritmos baseline (FFDH, BFDH, BL, NF)
 │   └── run_pointer.py            # Script rápido de prueba
 │
-├── 🎨 Visualización y Documentación
+├── Visualización y Documentación
 │   ├── GUIA_TESTING.md           # Guía completa de testing
 │   ├── VISUALIZACION_TESTING.md  # Documentación de visualización
 │   └── README.md                 # Este archivo
 │
-├── 📊 Datos y Configuración
+├── Datos y Configuración
 │   ├── generator.py              # Generador de problemas sintéticos
 │   ├── categories.py             # Definición de categorías C1-C7
 │   ├── states.py                 # Codificación de features (10+19 dims)
 │   ├── tests/                    # Instancias benchmark (c1p1.txt, c2p1.txt, ...)
 │   └── strip1.txt                # Descripción de benchmarks originales
 │
-├── 🤖 Modelos Pre-entrenados (4 modelos)
+├── Modelos Pre-entrenados (4 modelos)
 │   └── models/
 │       ├── pointer_c1_L4_H8_acc8212.pth    # Modelo C1 (82.12% accuracy)
 │       ├── pointer_c2_L4_H8_acc8155.pth    # Modelo C2 (81.55% accuracy)
 │       ├── pointer_c3_L4_H8_acc7616.pth    # Modelo C3 (76.16% accuracy)
 │       └── pointer_c4_L4_H8_acc7497.pth    # Modelo C4 (74.97% accuracy)
 │
-└── 📈 Resultados (generados automáticamente)
+└── Resultados (generados automáticamente)
     └── img/
         ├── complexity_analysis/       # Análisis de complejidad
         │   ├── tabla_C1.csv
@@ -153,7 +153,7 @@ Transformer---SPP/
 
 ---
 
-## 🤖 Modelos Pre-entrenados
+## Modelos Pre-entrenados
 
 El repositorio incluye **4 modelos entrenados** listos para usar:
 
@@ -165,11 +165,11 @@ El repositorio incluye **4 modelos entrenados** listos para usar:
 | **C4** | `pointer_c4_L4_H8_acc7497.pth` | 74.97% | 49 | ~20MB |
 
 **Hiperparámetros comunes:**
-- 🔢 `d_model=256` (dimensión del modelo)
-- 🧱 `num_enc_layers=4` (capas del encoder)
-- 👁️ `num_heads=8` (attention heads)
-- 🔄 `d_ff=512` (feed-forward hidden dim)
-- 📦 Entrenados con 500 problemas base × 3 (augmentation) = 1500 trayectorias
+- `d_model=256` (dimensión del modelo)
+- `num_enc_layers=4` (capas del encoder)
+- `num_heads=8` (attention heads)
+- `d_ff=512` (feed-forward hidden dim)
+- Entrenados con 500 problemas base × 3 (augmentation) = 1500 trayectorias
 
 **Uso rápido:**
 ```bash
@@ -182,9 +182,9 @@ python main.py C2 best-worst models/pointer_c2_L4_H8_acc8155.pth 30
 
 ---
 
-## ⚡ Guía de Uso Rápido
+## Guía de Uso Rápido
 
-### **🎯 Modo 1: Usar modelos pre-entrenados (Recomendado)**
+### ** Modo 1: Usar modelos pre-entrenados (Recomendado)**
 
 ```bash
 # Testear modelo C1 con 50 problemas
@@ -200,7 +200,7 @@ python main.py C3 visual models/pointer_c3_L4_H8_acc7616.pth
 python main.py C4 best-worst models/pointer_c4_L4_H8_acc7497.pth 20
 ```
 
-### **🔧 Modo 2: Entrenar nuevo modelo**
+### ** Modo 2: Entrenar nuevo modelo**
 
 ```bash
 # Entrenar modelo para categoría C1 (usa configuración por defecto)
@@ -211,13 +211,13 @@ python main.py C3
 ```
 
 **Configuración de entrenamiento (en `main.py`):**
-- 📦 500 problemas base × 3 (augmentation) = 1500 trayectorias
-- 🔄 200 épocas con early stopping (paciencia 40)
-- 📊 Batch size: 16
-- 🎓 Learning rate: 1e-4 (AdamW)
-- ⏱️ Tiempo aproximado: 2-4 horas (GPU) / 8-12 horas (CPU)
+-  500 problemas base × 3 (augmentation) = 1500 trayectorias
+-  200 épocas con early stopping (paciencia 40)
+-  Batch size: 16
+-  Learning rate: 1e-4 (AdamW)
+-  Tiempo aproximado: 2-4 horas (GPU) / 8-12 horas (CPU)
 
-### **📊 Modo 3: Análisis de complejidad completo**
+### ** Modo 3: Análisis de complejidad completo**
 
 ```bash
 # Analizar todas las categorías con 500 problemas cada una
@@ -225,14 +225,14 @@ python main.py complexity C1 C2 C3 C4 500
 ```
 
 Genera:
-- ✅ Tablas CSV con métricas (tiempo, memoria, altura, gaps)
-- ✅ Boxplots comparativos
-- ✅ Identificación de mejores/peores casos
-- ✅ Análisis de superioridad Pointer vs HR
+- Tablas CSV con métricas (tiempo, memoria, altura, gaps)
+- Boxplots comparativos
+- Identificación de mejores/peores casos
+- Análisis de superioridad Pointer vs HR
 
 ---
 
-## 📚 Manual Completo
+## Manual Completo
 
 ### **Comandos disponibles**
 
@@ -339,10 +339,10 @@ python main.py C2 visual models/pointer_c2_L4_H8_acc8155.pth
 ```
 
 **Muestra:**
-- 📊 Gráfico comparativo (Pointer a la izquierda, HR a la derecha)
-- 📏 Altura de cada solución con línea roja en Href
-- 🎨 Colores únicos por rectángulo
-- 📈 Diferencia absoluta y porcentual
+- Gráfico comparativo (Pointer a la izquierda, HR a la derecha)
+- Altura de cada solución con línea roja en Href
+- Colores únicos por rectángulo
+- Diferencia absoluta y porcentual
 
 ---
 
@@ -361,12 +361,12 @@ python main.py C3 best-worst models/pointer_c3_L4_H8_acc7616.pth 50
 ```
 Analizando 50 problemas...
 
-🏆 TOP 3 MEJORES CASOS (Pointer supera a HR):
+ TOP 3 MEJORES CASOS (Pointer supera a HR):
   #1: Problema 12 → Pointer: 45, HR: 48 (diferencia: -3, -6.25%)
   #2: Problema 37 → Pointer: 52, HR: 54 (diferencia: -2, -3.70%)
   #3: Problema 8  → Pointer: 38, HR: 39 (diferencia: -1, -2.56%)
 
-⚠️ TOP 3 PEORES CASOS (Pointer muy inferior a HR):
+ TOP 3 PEORES CASOS (Pointer muy inferior a HR):
   #1: Problema 23 → Pointer: 87, HR: 45 (diferencia: +42, +93.33%)
   #2: Problema 41 → Pointer: 72, HR: 48 (diferencia: +24, +50.00%)
   #3: Problema 15 → Pointer: 65, HR: 47 (diferencia: +18, +38.30%)
@@ -471,7 +471,7 @@ mkdir models
 
 ---
 
-## 🧠 Arquitectura del Modelo
+## Arquitectura del Modelo
 
 ### **Pointer Network basado en Transformer**
 
@@ -556,7 +556,7 @@ El modelo aprende a resolver el SPP mediante **Imitation Learning**, imitando la
 
 ---
 
-## 📊 Resultados Experimentales
+## Resultados Experimentales
 
 ### **Métricas Generales (2000 problemas de test)**
 
@@ -583,18 +583,18 @@ El modelo aprende a resolver el SPP mediante **Imitation Learning**, imitando la
 
 ```
 Ranking por Altura Final (menor = mejor):
-1. HR (Heuristic Recursion)     → Gap: 0.00%   ⭐ Referencia
-2. Bottom-Left                  → Gap: 13.43%  🥈 Segundo mejor
-3. Pointer Model                → Gap: 24.59%  🥉 Tercero (pero 8.5× más rápido)
+1. HR (Heuristic Recursion)     → Gap: 0.00%    Referencia
+2. Bottom-Left                  → Gap: 13.43%   Segundo mejor
+3. Pointer Model                → Gap: 24.59%   Tercero (pero 8.5× más rápido)
 4. BFDH                         → Gap: 28.40%
 5. FFDH                         → Gap: 28.50%
 6. Next Fit                     → Gap: 76.89%
 
 Ranking por Tiempo (menor = mejor):
-1. Next Fit        → 2.1 ms   ⚡ Más rápido (pero peor calidad)
+1. Next Fit        → 2.1 ms    Más rápido (pero peor calidad)
 2. FFDH            → 3.8 ms
 3. BFDH            → 4.2 ms
-4. Pointer Model   → 28.4 ms  🎯 Balance calidad/velocidad
+4. Pointer Model   → 28.4 ms   Balance calidad/velocidad
 5. Bottom-Left     → 156.7 ms
 6. HR              → 241.1 ms
 ```
@@ -602,45 +602,45 @@ Ranking por Tiempo (menor = mejor):
 ### **Análisis Crítico**
 
 **Fortalezas identificadas:**
-- ✅ Speedup consistente (8.5×) sin hardware especializado
-- ✅ Ocasionalmente descubre soluciones superiores (2.6% casos)
-- ✅ Iguala a HR en 8.3% de instancias (estrategias equivalentes)
-- ✅ Mejor que algoritmos greedy clásicos (FFDH, BFDH)
+- Speedup consistente (8.5×) sin hardware especializado
+- Ocasionalmente descubre soluciones superiores (2.6% casos)
+- Iguala a HR en 8.3% de instancias (estrategias equivalentes)
+- Mejor que algoritmos greedy clásicos (FFDH, BFDH)
 
 **Limitaciones observadas:**
-- ⚠️ Fragmentación vertical excesiva en casos complejos
-- ⚠️ Dificultad con rectángulos heterogéneos (C3, C4)
-- ⚠️ Decisiones tempranas subóptimas propagan errores
-- ⚠️ Representación vectorial fija (d=256) limita captura espacial
+- Fragmentación vertical excesiva en casos complejos
+- Dificultad con rectángulos heterogéneos (C3, C4)
+- Decisiones tempranas subóptimas propagan errores
+- Representación vectorial fija (d=256) limita captura espacial
 
 **Mejoras futuras propuestas:**
-- 🔮 Graph Neural Networks para relaciones espaciales explícitas
-- 🔮 Reinforcement Learning con reward shaping directo
-- 🔮 Beam search con k candidatos (exploración limitada)
-- 🔮 Refinamiento post-procesamiento con movimientos locales
+- Graph Neural Networks para relaciones espaciales explícitas
+- Reinforcement Learning con reward shaping directo
+- Beam search con k candidatos (exploración limitada)
+- Refinamiento post-procesamiento con movimientos locales
 
 Ver documentación completa en la tesis para análisis detallado.
 
 ---
 
-## 📖 Documentación Adicional
+## Documentación Adicional
 
-- 📘 **GUIA_TESTING.md** - Guía exhaustiva de testing y evaluación
-- 🎨 **VISUALIZACION_TESTING.md** - Sistema de visualización completa
-- 📄 **Tesis completa** - Fundamentos teóricos y análisis experimental
+- **GUIA_TESTING.md** - Guía exhaustiva de testing y evaluación
+- **VISUALIZACION_TESTING.md** - Sistema de visualización completa
+- **Tesis completa** - Fundamentos teóricos y análisis experimental
 
 ---
 
-## 🤝 Contribuciones
+##  Contribuciones
 
 Este proyecto es parte de una tesis de pregrado. Para consultas o colaboraciones:
 
-- 📧 Email: lucas.sepulveda@example.com
-- 🔗 GitHub: [@Lucas042002](https://github.com/Lucas042002)
+-  Email: lucas.sepulveda@example.com
+-  GitHub: [@Lucas042002](https://github.com/Lucas042002)
 
 ---
 
-## 📚 Referencias
+##  Referencias
 
 1. **Hopper, E., & Turton, B. C. H. (1999).** "An Empirical Investigation of Meta-heuristic and Heuristic Algorithms for a 2D Packing Problem." *European Journal of Operations Research*, 113(3), 503-521.
 
@@ -652,7 +652,7 @@ Este proyecto es parte de una tesis de pregrado. Para consultas o colaboraciones
 
 ---
 
-## ⭐ Agradecimientos
+##  Agradecimientos
 
 - Benchmarks basados en el trabajo de Hopper & Turton (1999)
 - Arquitectura inspirada en Pointer Networks (Vinyals et al., 2015) y Transformer (Vaswani et al., 2017)
